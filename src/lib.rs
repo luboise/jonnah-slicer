@@ -4,12 +4,13 @@ mod audio_player;
 mod project;
 
 pub use app::JonnahSlicer;
-use midi_reader_writer::midly_0_5::exports::{MidiMessage, TrackEventKind};
 
 pub(crate) fn slices_from_midi(
     bytes: &[u8],
     bpm_changes: &[audio::BPMChange],
 ) -> Result<Vec<project::Slice>, Box<dyn std::error::Error>> {
+    use midi_reader_writer::midly_0_5::exports::{MidiMessage, TrackEventKind};
+
     let midi_file = midi_reader_writer::midly_0_5::exports::Smf::parse(bytes)?;
 
     let mut ticks_to_micros =
