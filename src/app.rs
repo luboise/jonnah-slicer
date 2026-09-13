@@ -479,6 +479,13 @@ impl eframe::App for JonnahSlicer<'_> {
                             }
                         }
                     }
+
+                    if ui.button("Generate BMS File").clicked() {
+                        if let Err(e) = export_bms_file(self.default_export_dir().join("out.bms"), &self.project.as_project()) {
+                            eprintln!("failed to export BMS file: {e}");
+
+                        }
+                    }
                 });
             });
 
@@ -984,6 +991,24 @@ fn export_stem(
             return Err(format!("failed to export stem {file_name}: {e}").into());
         }
     }
+
+    Ok(())
+}
+
+fn export_bms_file(
+    path: impl AsRef<std::path::Path>,
+    project: &crate::project::Project,
+) -> Result<(), crate::Error> {
+    let bms = bms_rs::bms::model::Bms::try_from(project.clone())?;
+
+    let s = bms
+        .unparse::<bms_rs::bms::command::channel::mapper::KeyLayoutBeat>()
+        .into_iter()
+        .map(|token| token.to_string())
+        .collect::<Vec<String>>()
+        .join("\n");
+
+    std::fs::write(path, s)?;
 
     Ok(())
 }
