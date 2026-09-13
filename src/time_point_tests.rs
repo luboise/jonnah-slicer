@@ -7,7 +7,7 @@ fn assert_close(a: f64, b: f64) {
 }
 
 #[test]
-fn mono_sample_index_test() -> Result<(), Box<dyn std::error::Error>> {
+fn mono_sample_index_test() -> Result<(), crate::Error> {
     let bpm_changes = vec![BPMChange {
         time_point: TimePoint::new(0, 0.0),
         bpm: 160.0,
@@ -122,7 +122,7 @@ fn quantise_1_4() {
 }
 
 #[test]
-fn from_time() -> Result<(), Box<dyn std::error::Error>> {
+fn from_time() -> Result<(), crate::Error> {
     let bpm_changes = [
         BPMChange {
             time_point: TimePoint {

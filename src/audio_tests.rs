@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn half_bpm_120_to_60() -> Result<(), Box<dyn std::error::Error>> {
+fn half_bpm_120_to_60() -> Result<(), crate::Error> {
     const NUM_CHANNELS: u16 = 2;
 
     let x = calculate_num_samples(

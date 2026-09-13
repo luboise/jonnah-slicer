@@ -5,10 +5,12 @@ mod project;
 
 pub use app::JonnahSlicer;
 
+pub type Error = Box<dyn std::error::Error>;
+
 pub(crate) fn slices_from_midi(
     bytes: &[u8],
     bpm_changes: &[audio::BPMChange],
-) -> Result<Vec<project::Slice>, Box<dyn std::error::Error>> {
+) -> Result<Vec<project::Slice>, Error> {
     use midi_reader_writer::midly_0_5::exports::{MidiMessage, TrackEventKind};
 
     let midi_file = midi_reader_writer::midly_0_5::exports::Smf::parse(bytes)?;

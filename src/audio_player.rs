@@ -11,9 +11,7 @@ pub struct AudioPlayer {
 }
 
 impl AudioPlayer {
-    pub fn new(
-        sample_rate: crate::project::SampleRate,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(sample_rate: crate::project::SampleRate) -> Result<Self, crate::Error> {
         let host = cpal::default_host();
 
         const BUFFER_SIZE_PER_CHANNEL: u32 = 1024;
@@ -180,7 +178,7 @@ impl AudioPlayback {
     pub fn new(
         stream: impl Into<AudioStream>,
         cursor_start: Option<usize>,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    ) -> Result<Self, crate::Error> {
         let stream = std::sync::Arc::new(stream.into());
 
         let length = stream

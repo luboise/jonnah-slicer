@@ -51,14 +51,11 @@ impl TimePoint {
         sample: usize,
         sample_rate: i32,
         bpm_changes: &[BPMChange],
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    ) -> Result<Self, crate::Error> {
         Self::from_time(sample as f64 / sample_rate as f64, bpm_changes)
     }
 
-    pub fn from_time(
-        time_seconds: f64,
-        bpm_changes: &[BPMChange],
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_time(time_seconds: f64, bpm_changes: &[BPMChange]) -> Result<Self, crate::Error> {
         if bpm_changes.is_empty() {
             return Err("no bpm changes".into());
         }
@@ -140,10 +137,7 @@ impl TimePoint {
         self.measure + self.submeasure.ceil() as i64
     }
 
-    pub fn seconds_from_start(
-        &self,
-        bpm_changes: &[BPMChange],
-    ) -> Result<f64, Box<dyn std::error::Error>> {
+    pub fn seconds_from_start(&self, bpm_changes: &[BPMChange]) -> Result<f64, crate::Error> {
         calculate_timepoints_distance(
             Self {
                 measure: 0,
@@ -159,7 +153,7 @@ impl TimePoint {
         &self,
         channel_sample_rate: i32,
         bpm_changes: &[BPMChange],
-    ) -> Result<usize, Box<dyn std::error::Error>> {
+    ) -> Result<usize, crate::Error> {
         let seconds = self.seconds_from_start(bpm_changes)?;
 
         Ok((seconds * channel_sample_rate as f64) as usize)
@@ -363,7 +357,7 @@ impl AudioFile {
         &self,
         slices: &[crate::project::Slice],
         bpm_changes: &[BPMChange],
-    ) -> Result<Vec<&[f32]>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<&[f32]>, crate::Error> {
         let sample_counts = std::iter::once(&crate::project::Slice {
             time_point: Default::default(),
         })
@@ -401,7 +395,7 @@ impl AudioFile {
         &self,
         starting_sample: usize,
         frame_counts: &[usize],
-    ) -> Result<Vec<&[f32]>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<&[f32]>, crate::Error> {
         let mut cuts = vec![];
 
         let mut num_samples = 0usize;
@@ -456,7 +450,7 @@ impl AudioFile {
         slices: &crate::project::Slices,
         bpm_changes: &[BPMChange],
         file_name_fn: Option<&impl Fn(usize) -> String>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), crate::Error> {
         let cuts = self.cuts_from_slices(&slices.0, bpm_changes)?;
 
         let export_dir = export_dir.as_ref();
@@ -535,7 +529,7 @@ pub fn calculate_timepoints_distance(
     start: TimePoint,
     end: TimePoint,
     bpm_changes: &[BPMChange],
-) -> Result<f64, Box<dyn std::error::Error>> {
+) -> Result<f64, crate::Error> {
     let prefirst_bpm_change = bpm_changes
         .iter()
         .position(|bpm_change| bpm_change.time_point <= start)
@@ -574,7 +568,7 @@ pub fn calculate_num_samples(
     sample_rate: crate::project::SampleRate,
     num_channels: u16,
     bpm_changes: &[BPMChange],
-) -> Result<usize, Box<dyn std::error::Error>> {
+) -> Result<usize, crate::Error> {
     let num_seconds = calculate_timepoints_distance(start, end, bpm_changes)?;
     let samples_per_second = sample_rate.0 as usize * num_channels as usize;
 

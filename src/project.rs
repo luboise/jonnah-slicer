@@ -104,9 +104,7 @@ pub fn normalise_project_path(path: impl AsRef<std::path::Path>) -> std::path::P
     }
 }
 
-pub fn load_project(
-    path: impl AsRef<std::path::Path>,
-) -> Result<Project, Box<dyn std::error::Error>> {
+pub fn load_project(path: impl AsRef<std::path::Path>) -> Result<Project, crate::Error> {
     let load_path = normalise_project_path(path.as_ref());
 
     let project =
@@ -118,7 +116,7 @@ pub fn load_project(
 pub fn save_project(
     project: &Project,
     path: impl AsRef<std::path::Path>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), crate::Error> {
     let save_path = normalise_project_path(path.as_ref());
 
     let parent = save_path.parent().ok_or("unable to get parent path")?;

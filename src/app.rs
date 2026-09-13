@@ -1,4 +1,4 @@
-use egui::emath::Numeric;
+use egui::emath::Numeric as _;
 
 use crate::audio::calculate_num_samples;
 
@@ -34,7 +34,7 @@ enum ProjectStatus {
     #[default]
     None,
     Loaded,
-    Failed(Box<dyn std::error::Error>),
+    Failed(crate::Error),
 }
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
@@ -93,7 +93,7 @@ pub struct LiveProject {
 }
 
 impl std::convert::TryFrom<crate::project::Project> for LiveProject {
-    type Error = Box<dyn std::error::Error>;
+    type Error = crate::Error;
 
     fn try_from(project: crate::project::Project) -> Result<Self, Self::Error> {
         let crate::project::Project {
@@ -203,7 +203,7 @@ impl JonnahSlicer<'_> {
     }
 
     // TODO: Document errors that this function can return
-    pub fn save_to_disk(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn save_to_disk(&mut self) -> Result<(), crate::Error> {
         crate::project::save_project(
             &self.project.as_project(),
             self.project_path
@@ -752,7 +752,7 @@ fn draw_stem(
     input_state: &InputState,
     start_time: crate::audio::TimePoint,
     end_time: crate::audio::TimePoint,
-) -> Result<(egui::Rect, Option<StemEvent>), Box<dyn std::error::Error>> {
+) -> Result<(egui::Rect, Option<StemEvent>), crate::Error> {
     let (rect, response) = ui.allocate_exact_size(
         egui::Vec2::new(ui.available_width(), STEM_HEIGHT),
         egui::Sense::click(),
