@@ -145,7 +145,7 @@ impl TimePoint {
         bpm_changes: &[BPMChange],
     ) -> Result<f64, Box<dyn std::error::Error>> {
         calculate_timepoints_distance(
-            TimePoint {
+            Self {
                 measure: 0,
                 submeasure: 0.0,
             },
