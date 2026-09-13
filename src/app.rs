@@ -297,7 +297,7 @@ impl eframe::App for JonnahSlicer<'_> {
                     self.project.stems.push(LiveStem {
                         stem: crate::project::Stem {
                             audio_path: file_path,
-                            slices: vec![],
+                            slices: crate::project::Slices::default(),
                             starting_keysound: None,
                         },
                         audio: None,
@@ -594,15 +594,12 @@ impl eframe::App for JonnahSlicer<'_> {
                             match event {
                                 Some(StemEvent::Hovering) => {
                                     for slice in std::mem::take(&mut self.midi_file_slices) {
-                                        // TODO: Make this faster?
-                                        stem.stem.slices.push(slice);
+                                        stem.stem.slices.insert(slice);
                                     }
                                 }
                                 Some(StemEvent::PlayAudio(sample_clicked))
                                     if let Some(audio) = &stem.audio =>
                                 {
-                                    stem.stem.slices.sort_by_key(|v| v.time_point);
-
                                     // If there is a slice before our cursor
                                     if let Some((first_slice_index, first_slice)) =
                                         stem.stem.slices.iter().enumerate().rfind(|(_, slice)| {
@@ -619,7 +616,7 @@ impl eframe::App for JonnahSlicer<'_> {
                                             v < sample_clicked
                                         })
                                         && let Some(second_slice) =
-                                            stem.stem.slices.get(first_slice_index + 1)
+                                            stem.stem.slices.0.get(first_slice_index + 1)
                                     {
                                         let start = first_slice.time_point;
                                         let end = second_slice.time_point;
@@ -678,7 +675,7 @@ impl eframe::App for JonnahSlicer<'_> {
                                         return;
                                     };
 
-                                    stem.stem.slices.push(crate::project::Slice {
+                                    stem.stem.slices_mut().insert(crate::project::Slice {
                                         time_point: time_point.quantised(self.slice_snapping),
                                     });
                                 }
@@ -695,12 +692,9 @@ impl eframe::App for JonnahSlicer<'_> {
                                         return;
                                     };
 
-                                    stem.stem.slices.dedup_by_key(|v| v.time_point);
-                                    stem.stem.slices.sort_by_key(|v| v.time_point);
-
                                     const DELETE_DISTANCE: f64 = 0.15;
 
-                                    stem.stem.slices.retain(|slice| {
+                                    stem.stem.slices.0.retain(|slice| {
                                         f64::from(slice.time_point - time_point).abs()
                                             > DELETE_DISTANCE
                                     });

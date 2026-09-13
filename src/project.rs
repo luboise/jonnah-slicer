@@ -4,11 +4,52 @@ pub struct Slice {
     // Room here later to add de-duplication of keysounds and custom keysound IDs
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default)]
+#[serde(transparent)]
+pub struct Slices(pub Vec<Slice>);
+
+impl IntoIterator for Slices {
+    type Item = Slice;
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl Slices {
+    pub fn slices(&self) -> &[Slice] {
+        &self.0
+    }
+
+    pub fn insert(&mut self, new_slice: Slice) {
+        if self.0.iter().any(|v| v.time_point == new_slice.time_point) {
+            return;
+        }
+        // TODO: Make this not redo the entire thing on every insert
+        self.0.push(new_slice);
+        self.0.sort_by_key(|f| f.time_point);
+    }
+
+    pub fn iter(&self) -> std::slice::Iter<'_, Slice> {
+        self.0.iter()
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct Stem {
     pub audio_path: std::path::PathBuf,
-    pub slices: Vec<Slice>,
+    pub slices: Slices,
     pub starting_keysound: Option<u64>,
+}
+
+impl Stem {
+    pub fn slices(&self) -> &Slices {
+        &self.slices
+    }
+
+    pub fn slices_mut(&mut self) -> &mut Slices {
+        &mut self.slices
+    }
 }
 
 #[derive(

@@ -453,11 +453,11 @@ impl AudioFile {
     pub fn export_slices(
         &self,
         export_dir: impl AsRef<std::path::Path>,
-        slices: &[crate::project::Slice],
+        slices: &crate::project::Slices,
         bpm_changes: &[BPMChange],
         file_name_fn: Option<impl Fn(usize) -> String>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let cuts = self.cuts_from_slices(slices, bpm_changes)?;
+        let cuts = self.cuts_from_slices(&slices.0, bpm_changes)?;
 
         let export_dir = export_dir.as_ref();
 
