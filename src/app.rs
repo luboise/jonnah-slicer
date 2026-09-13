@@ -214,6 +214,13 @@ impl JonnahSlicer<'_> {
     }
 
     pub fn draw_everything(&mut self, ui: &mut egui::Ui) {}
+
+    pub fn default_export_dir(&self) -> std::path::PathBuf {
+        self.project_path
+            .as_ref()
+            .map(|v| v.join("out"))
+            .unwrap_or_else(|| "./".into())
+    }
 }
 
 impl eframe::App for JonnahSlicer<'_> {
@@ -464,6 +471,14 @@ impl eframe::App for JonnahSlicer<'_> {
                     } else {
                         ui.colored_label(egui::Color32::RED, "audio player not initialised");
                     }
+
+                    if ui.button("Export All Stems").clicked() {
+                        for stem in &self.project.stems {
+                            if let Err(e) = export_stem(self.default_export_dir(), stem, &self.project.bpm_changes) {
+                                eprintln!("failed to export all stems: {e}");
+                            }
+                        }
+                    }
                 });
             });
 
@@ -505,6 +520,8 @@ impl eframe::App for JonnahSlicer<'_> {
                         }
                     }
 
+                    let export_dir = self.default_export_dir();
+
                     for stem in &mut self.project.stems {
                         let full_stem_dims = [ui.available_width(), STEM_HEIGHT];
 
@@ -517,13 +534,7 @@ impl eframe::App for JonnahSlicer<'_> {
                                 egui::Layout::top_down_justified(egui::Align::Center),
                                 |ui| {
                                     if ui.button("Export").clicked() {
-                                        let export_dir = self
-                                            .project_path
-                                            .as_ref()
-                                            .map(|v| v.join("out"))
-                                            .unwrap_or_else(|| "./".into());
-
-                                        export_stem(export_dir, stem, &self.project.bpm_changes).expect("bad export");
+                                        export_stem(&export_dir, stem, &self.project.bpm_changes).expect("bad export");
                                     }
 
                                     ui.horizontal(|ui| {
