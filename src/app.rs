@@ -523,28 +523,7 @@ impl eframe::App for JonnahSlicer<'_> {
                                             .map(|v| v.join("out"))
                                             .unwrap_or_else(|| "./".into());
 
-                                        if let Err(e) = stem.audio.as_ref().unwrap().export_slices(
-                                            export_dir,
-                                            &stem.stem.slices,
-                                            &self.project.bpm_changes,
-                                            Some(&|i| {
-                                                format!(
-                                                    "{:0>2}",
-                                                    base62::encode(
-                                                        i as u64
-                                                            + stem
-                                                                .stem
-                                                                .starting_keysound
-                                                                .unwrap_or(0),
-                                                    )
-                                                )
-                                            }),
-                                        ) {
-                                            eprintln!("failed to export slices: {e}");
-                                            return;
-                                        }
-
-                                        println!("exported successfully")
+                                        export_stem(export_dir, stem, &self.project.bpm_changes).expect("bad export");
                                     }
 
                                     ui.horizontal(|ui| {
@@ -958,4 +937,42 @@ fn draw_stem(
     }
 
     Ok((rect, event))
+}
+
+fn export_stem(
+    export_dir: impl AsRef<std::path::Path>,
+    live_stem: &LiveStem,
+    bpm_changes: &[crate::audio::BPMChange],
+) -> Result<(), crate::Error> {
+    let export_dir = export_dir.as_ref();
+
+    let Some(audio) = live_stem.audio.as_ref() else {
+        return Err("bad stem".into());
+    };
+
+    let slices: &crate::project::Slices = &live_stem.stem.slices;
+
+    let Some(wav_file_stem) = live_stem
+        .stem
+        .audio_path
+        .file_stem()
+        .and_then(|v| v.to_str())
+    else {
+        return Err("bad file stem".into());
+    };
+
+    let cuts = audio.cuts_from_slices(&slices.0, bpm_changes)?;
+    if !export_dir.exists() {
+        std::fs::create_dir_all(export_dir)?;
+    }
+
+    for (i, cut) in cuts.into_iter().enumerate() {
+        let file_name = format!("{wav_file_stem}_{i:03}.wav");
+
+        if let Err(e) = wavers::write(export_dir.join(&file_name), cut, audio.sample_rate(), 2) {
+            return Err(format!("failed to export stem {file_name}: {e}").into());
+        }
+    }
+
+    Ok(())
 }

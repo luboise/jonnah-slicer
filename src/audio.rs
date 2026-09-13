@@ -444,38 +444,6 @@ impl AudioFile {
         Ok(cuts)
     }
 
-    pub fn export_slices(
-        &self,
-        export_dir: impl AsRef<std::path::Path>,
-        slices: &crate::project::Slices,
-        bpm_changes: &[BPMChange],
-        file_name_fn: Option<&impl Fn(usize) -> String>,
-    ) -> Result<(), crate::Error> {
-        let cuts = self.cuts_from_slices(&slices.0, bpm_changes)?;
-
-        let export_dir = export_dir.as_ref();
-
-        if !export_dir.exists() {
-            std::fs::create_dir_all(export_dir)?;
-        }
-
-        for (i, cut) in cuts.into_iter().enumerate() {
-            let mut file_name = if let Some(f) = &file_name_fn {
-                f(i)
-            } else {
-                format!("{i:0>2}")
-            };
-
-            file_name.push_str(".wav");
-
-            if let Err(e) = wavers::write(export_dir.join(&file_name), cut, self.sample_rate(), 2) {
-                return Err(format!("failed to export stem {file_name}: {e}").into());
-            }
-        }
-
-        Ok(())
-    }
-
     pub fn draw_channel(
         &self,
         channel_index: u16,
