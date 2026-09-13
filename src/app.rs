@@ -527,7 +527,7 @@ impl eframe::App for JonnahSlicer<'_> {
                                             export_dir,
                                             &stem.stem.slices,
                                             &self.project.bpm_changes,
-                                            Some(|i| {
+                                            Some(&|i| {
                                                 format!(
                                                     "{:0>2}",
                                                     base62::encode(

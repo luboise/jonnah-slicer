@@ -455,7 +455,7 @@ impl AudioFile {
         export_dir: impl AsRef<std::path::Path>,
         slices: &crate::project::Slices,
         bpm_changes: &[BPMChange],
-        file_name_fn: Option<impl Fn(usize) -> String>,
+        file_name_fn: Option<&impl Fn(usize) -> String>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let cuts = self.cuts_from_slices(&slices.0, bpm_changes)?;
 
@@ -466,15 +466,16 @@ impl AudioFile {
         }
 
         for (i, cut) in cuts.into_iter().enumerate() {
-            let file_stem = file_name_fn
-                .as_ref()
-                .map(|f| f(i))
-                .unwrap_or(format!("{i:0>2}"));
+            let mut file_name = if let Some(f) = &file_name_fn {
+                f(i)
+            } else {
+                format!("{i:0>2}")
+            };
 
-            let file_name = file_stem + ".wav";
+            file_name.push_str(".wav");
 
             if let Err(e) = wavers::write(export_dir.join(&file_name), cut, self.sample_rate(), 2) {
-                return Err(format!("failed to export stem {}: {e}", file_name).into());
+                return Err(format!("failed to export stem {file_name}: {e}").into());
             }
         }
 
