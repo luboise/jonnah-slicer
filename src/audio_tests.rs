@@ -1,3 +1,5 @@
+use crate::project::Slice;
+
 use super::*;
 
 #[test]
@@ -34,3 +36,270 @@ fn half_bpm_120_to_60() -> Result<(), crate::Error> {
 
     Ok(())
 }
+
+#[test]
+fn cuts() -> Result<(), crate::Error> {
+    let (starting_sample, sample_counts) = slices_to_sample_counts(
+        48000.into(),
+        1,
+        &TEST_TIME_POINTS,
+        &[BPMChange {
+            time_point: Default::default(),
+            bpm: 180.0,
+        }],
+    )?;
+
+    // First slice is not at zero
+    assert_ne!(starting_sample, 0);
+    // There should be 38 of them
+    assert_eq!(sample_counts.len(), TEST_TIME_POINTS.len());
+
+    assert_eq!(
+        sample_counts[0..38],
+        [
+            4, 4, 4, 4, // beat 1
+            4, 1, 1, 2, 4, 4, // beat 2
+            4, 4, 4, 4, // beat 3
+            4, 4, 4, 4, // beat 4
+            4, 4, 4, 4, // beat 5
+            4, 4, 4, 4, // beat 6
+            4, 4, 4, 4, // beat 7
+            2, 2, 2, 2, 2, 2, 2, 2 // beat 8
+        ]
+        // Length of a half beat is 8000 samples here
+        .map(|v| v * 2000),
+    );
+
+    Ok(())
+}
+
+const TEST_TIME_POINTS: [crate::project::Slice; 38] = [
+    Slice {
+        time_point: TimePoint {
+            measure: 5,
+            submeasure: 0.0,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 5,
+            submeasure: 0.125,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 5,
+            submeasure: 0.25,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 5,
+            submeasure: 0.375,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 5,
+            submeasure: 0.5,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 5,
+            submeasure: 0.625,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 5,
+            submeasure: 0.65625,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 5,
+            submeasure: 0.6875,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 5,
+            submeasure: 0.75,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 5,
+            submeasure: 0.875,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 6,
+            submeasure: 0.0,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 6,
+            submeasure: 0.125,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 6,
+            submeasure: 0.25,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 6,
+            submeasure: 0.375,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 6,
+            submeasure: 0.5,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 6,
+            submeasure: 0.625,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 6,
+            submeasure: 0.75,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 6,
+            submeasure: 0.875,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 7,
+            submeasure: 0.0,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 7,
+            submeasure: 0.125,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 7,
+            submeasure: 0.25,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 7,
+            submeasure: 0.375,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 7,
+            submeasure: 0.5,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 7,
+            submeasure: 0.625,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 7,
+            submeasure: 0.75,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 7,
+            submeasure: 0.875,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 8,
+            submeasure: 0.0,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 8,
+            submeasure: 0.125,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 8,
+            submeasure: 0.25,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 8,
+            submeasure: 0.375,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 8,
+            submeasure: 0.5,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 8,
+            submeasure: 0.5625,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 8,
+            submeasure: 0.625,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 8,
+            submeasure: 0.6875,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 8,
+            submeasure: 0.75,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 8,
+            submeasure: 0.8125,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 8,
+            submeasure: 0.875,
+        },
+    },
+    Slice {
+        time_point: TimePoint {
+            measure: 8,
+            submeasure: 0.9375,
+        },
+    },
+];

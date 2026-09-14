@@ -1,6 +1,6 @@
 use egui::emath::Numeric as _;
 
-use crate::audio::calculate_num_samples;
+use crate::audio::{self, calculate_num_samples};
 
 pub const STEM_HEIGHT: f32 = 200.0;
 
@@ -979,7 +979,16 @@ fn export_stem(
         return Err("bad file stem".into());
     };
 
-    let cuts = audio.cuts_from_slices(&slices.0, bpm_changes)?;
+    let (starting_sample, cuts) = audio::slices_to_sample_counts(
+        audio.sample_rate().into(),
+        // TODO: Use proper number of channels here, this was hardcoded to 1 before but I can't
+        // remember why
+        1, // audio.num_channels(),
+        &slices.0,
+        bpm_changes,
+    )?;
+    let cuts = audio.cuts_from_sample_counts(starting_sample, &cuts)?;
+
     if !export_dir.exists() {
         std::fs::create_dir_all(export_dir)?;
     }

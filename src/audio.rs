@@ -1,6 +1,46 @@
 // TODO: Make this part of BPMChange to support other time signatures
 pub const BEATS_PER_MEASURE: usize = 4;
 
+/// Get slices to feed to [`AudioFile::cuts_from_sample_counts`]
+pub fn slices_to_sample_counts(
+    sample_rate: crate::project::SampleRate,
+    num_channels: u16,
+    slices: &[crate::project::Slice],
+    bpm_changes: &[BPMChange],
+) -> Result<(usize, Vec<usize>), crate::Error> {
+    let sample_counts = std::iter::once(&crate::project::Slice {
+        time_point: Default::default(),
+    })
+    .chain(slices.iter())
+    .map(|slice| {
+        calculate_num_samples(
+            Default::default(),
+            slice.time_point,
+            sample_rate,
+            num_channels,
+            bpm_changes,
+        )
+    })
+    .collect::<Result<Vec<_>, _>>()?;
+
+    let starting_sample = calculate_num_samples(
+        Default::default(),
+        slices.first().ok_or("no slice 0")?.time_point,
+        sample_rate,
+        num_channels,
+        bpm_changes,
+    )?;
+
+    let sample_counts = sample_counts
+        .clone()
+        .into_iter()
+        .zip(sample_counts.into_iter().skip(1))
+        .map(|(l, r)| r - l)
+        .collect::<Vec<_>>();
+
+    Ok((starting_sample, sample_counts))
+}
+
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub enum Snapping {
     Measure(u16),
@@ -353,45 +393,7 @@ impl AudioFile {
         vecs
     }
 
-    pub fn cuts_from_slices(
-        &self,
-        slices: &[crate::project::Slice],
-        bpm_changes: &[BPMChange],
-    ) -> Result<Vec<&[f32]>, crate::Error> {
-        let sample_counts = std::iter::once(&crate::project::Slice {
-            time_point: Default::default(),
-        })
-        .chain(slices.iter())
-        .map(|slice| {
-            calculate_num_samples(
-                Default::default(),
-                slice.time_point,
-                self.sample_rate,
-                1,
-                bpm_changes,
-            )
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-        let starting_sample = calculate_num_samples(
-            Default::default(),
-            slices.first().ok_or("no slice 0")?.time_point,
-            self.sample_rate,
-            1,
-            bpm_changes,
-        )?;
-
-        let sample_counts = sample_counts
-            .clone()
-            .into_iter()
-            .zip(sample_counts.into_iter().skip(1))
-            .map(|(l, r)| r - l)
-            .collect::<Vec<_>>();
-
-        self.cuts_from_samples(starting_sample, &sample_counts)
-    }
-
-    pub fn cuts_from_samples(
+    pub fn cuts_from_sample_counts(
         &self,
         starting_sample: usize,
         frame_counts: &[usize],
