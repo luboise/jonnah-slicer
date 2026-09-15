@@ -3,7 +3,7 @@ impl TryFrom<crate::audio::TimePoint> for bms_rs::bms::command::time::ObjTime {
 
     fn try_from(value: crate::audio::TimePoint) -> Result<Self, Self::Error> {
         // TODO: Make time points store the values based on fractions instead
-        let numerator = (((value.submeasure) * 4.0) as u64) + 1;
+        let numerator = (((value.submeasure) * 4.0) as u64);
         let denominator = 4;
 
         let time =
