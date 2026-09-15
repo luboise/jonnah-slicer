@@ -3,8 +3,8 @@ impl TryFrom<crate::audio::TimePoint> for bms_rs::bms::command::time::ObjTime {
 
     fn try_from(value: crate::audio::TimePoint) -> Result<Self, Self::Error> {
         // TODO: Make time points store the values based on fractions instead
-        let numerator = (((value.submeasure) * 16.0).round()) as u64;
-        let denominator = 16;
+        let numerator = (((value.submeasure) * 32.0).round()) as u64;
+        let denominator = 32;
 
         let time = Self::new(value.measure as u64, numerator, denominator)
             .ok_or_else(|| format!("failed to create ObjTime from TimePoint {value:?}"))?;
