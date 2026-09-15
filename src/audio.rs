@@ -8,36 +8,41 @@ pub fn slices_to_sample_counts(
     slices: &[crate::project::Slice],
     bpm_changes: &[BPMChange],
 ) -> Result<(usize, Vec<usize>), crate::Error> {
-    let sample_counts = std::iter::once(&crate::project::Slice {
-        time_point: Default::default(),
-    })
-    .chain(slices.iter())
-    .map(|slice| {
-        calculate_num_samples(
-            Default::default(),
-            slice.time_point,
-            sample_rate,
-            num_channels,
-            bpm_changes,
-        )
-    })
-    .collect::<Result<Vec<_>, _>>()?;
+    let sample_counts = slices
+        .iter()
+        // Add on a fake one at the end
+        .chain(std::iter::once(&crate::project::Slice {
+            time_point: 9999999.0.into(),
+        }))
+        .map(|slice| {
+            calculate_num_samples(
+                Default::default(),
+                slice.time_point,
+                sample_rate,
+                num_channels,
+                bpm_changes,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    // len sample_counts = len slices
 
     let starting_sample = calculate_num_samples(
-        Default::default(),
+        TimePoint::default(),
         slices.first().ok_or("no slice 0")?.time_point,
         sample_rate,
-        num_channels,
+        1,
         bpm_changes,
     )?;
 
-    let sample_counts = sample_counts
+    let mut sample_counts = sample_counts
         .clone()
         .into_iter()
         .zip(sample_counts.into_iter().skip(1))
         .map(|(l, r)| r - l)
         .collect::<Vec<_>>();
 
+    *sample_counts.last_mut().ok_or("bad")? = 4000;
     Ok((starting_sample, sample_counts))
 }
 
@@ -403,6 +408,8 @@ impl AudioFile {
         let mut num_samples = 0usize;
 
         let samples_slice = self.samples.iter().as_slice();
+
+        let starting_sample = starting_sample * self.num_channels() as usize;
 
         if starting_sample >= samples_slice.len() {
             return Err(format!("starting sample {starting_sample} out of range").into());

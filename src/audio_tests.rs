@@ -3,6 +3,27 @@ use crate::project::Slice;
 use super::*;
 
 #[test]
+fn num_samples() -> Result<(), crate::Error> {
+    let num_samples = calculate_num_samples(
+        TimePoint::default(),
+        TimePoint::from(5.0),
+        crate::project::SampleRate(48000),
+        1,
+        &[BPMChange {
+            time_point: TimePoint {
+                measure: 0,
+                submeasure: 0.0,
+            },
+            bpm: 180.0,
+        }],
+    )?;
+
+    assert_eq!(num_samples, 320_000, "bad num_samples");
+
+    Ok(())
+}
+
+#[test]
 fn half_bpm_120_to_60() -> Result<(), crate::Error> {
     const NUM_CHANNELS: u16 = 2;
 
@@ -51,6 +72,9 @@ fn cuts() -> Result<(), crate::Error> {
 
     // First slice is not at zero
     assert_ne!(starting_sample, 0);
+    // Check the actual value
+    assert_eq!(starting_sample, 320_000);
+
     // There should be 38 of them
     assert_eq!(sample_counts.len(), TEST_TIME_POINTS.len());
 
@@ -58,15 +82,15 @@ fn cuts() -> Result<(), crate::Error> {
         sample_counts[0..38],
         [
             4, 4, 4, 4, // beat 1
-            4, 1, 1, 2, 4, 4, // beat 2
-            4, 4, 4, 4, // beat 3
-            4, 4, 4, 4, // beat 4
+            4, 1, 1, 2, 4, 4, // beat 3
             4, 4, 4, 4, // beat 5
-            4, 4, 4, 4, // beat 6
             4, 4, 4, 4, // beat 7
-            2, 2, 2, 2, 2, 2, 2, 2 // beat 8
+            4, 4, 4, 4, // beat 9
+            4, 4, 4, 4, // beat 11
+            4, 4, 4, 4, // beat 13
+            2, 2, 2, 2, 2, 2, 2, 2 // beat 15-16
         ]
-        // Length of a half beat is 8000 samples here
+        // Length of a half beat is 2000 samples at 180 BPM
         .map(|v| v * 2000),
     );
 
