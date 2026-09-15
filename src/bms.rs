@@ -62,9 +62,9 @@ impl TryFrom<crate::project::Project> for bms_rs::bms::model::Bms {
         let mut notes = bms_rs::bms::model::Notes::default();
 
         for (channel, stem) in stems.iter().enumerate() {
-            let note_channel_id = [b'1', base62::encode(channel as u64 + 1).as_bytes()[0]]
-                .try_into()
-                .map_err(|e| format!("bad input: {e:#?}"))?;
+            // let note_channel_id = [b'1', base62::encode(channel as u64 + 1).as_bytes()[0]]
+            //     .try_into()
+            //     .map_err(|e| format!("bad input: {e:#?}"))?;
 
             let obj_id = stem.starting_keysound.unwrap_or(0);
 
@@ -90,16 +90,16 @@ impl TryFrom<crate::project::Project> for bms_rs::bms::model::Bms {
                 let wav_obj_id = bms_rs::bms::command::ObjId::try_from(&encoded, true)?;
                 wav_files.insert(wav_obj_id, wav_path.into());
 
-                // notes.push_bgm::<bms_rs::bms::command::channel::mapper::KeyLayoutBeat>(
-                //     slice.time_point.try_into()?,
-                //     wav_obj_id,
-                // );
+                notes.push_bgm::<bms_rs::bms::command::channel::mapper::KeyLayoutBeat>(
+                    slice.time_point.try_into()?,
+                    wav_obj_id,
+                );
 
-                notes.push_note(bms_rs::bms::model::obj::WavObj {
-                    offset: slice.time_point.try_into()?,
-                    channel_id: note_channel_id,
-                    wav_id: wav_obj_id,
-                });
+                // notes.push_note(bms_rs::bms::model::obj::WavObj {
+                //     offset: slice.time_point.try_into()?,
+                //     channel_id: note_channel_id,
+                //     wav_id: wav_obj_id,
+                // });
             }
         }
 

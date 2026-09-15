@@ -391,21 +391,6 @@ impl eframe::App for JonnahSlicer<'_> {
 
                 egui::widgets::global_theme_preference_buttons(ui);
             });
-
-            ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
-                ui.label("Snapping: ");
-                for snap_v in [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 64, 128] {
-                    let button = ui.button(format!("1/{snap_v}"));
-
-                    if self.slice_snapping.as_measure_denom() == snap_v {
-                        button.highlight();
-                    } else {
-                        if button.clicked() {
-                            self.slice_snapping = crate::audio::Snapping::Measure(snap_v);
-                        }
-                    }
-                }
-            });
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -414,6 +399,21 @@ impl eframe::App for JonnahSlicer<'_> {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+            ui.label("Snapping: ");
+            for snap_v in [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 64, 128] {
+                let button = ui.button(format!("1/{snap_v}"));
+
+                if self.slice_snapping.as_measure_denom() == snap_v {
+                    button.highlight();
+                } else {
+                    if button.clicked() {
+                        self.slice_snapping = crate::audio::Snapping::Measure(snap_v);
+                    }
+                }
+            }
+        });
+
         egui::CentralPanel::default().show_inside(ui, |ui| {
             if let Some(jonnah) = &self.jonnah_image {
                 jonnah.paint_at(ui, ui.content_rect());
