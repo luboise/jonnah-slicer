@@ -55,6 +55,9 @@ env_logger = "0.11.8"
 wasm-bindgen-futures = "0.4.50"
 web-sys = "0.3.70"              # to access the DOM (to hide the loading text)
 
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
 [profile.release]
 opt-level = 2 # fast and small wasm
 
