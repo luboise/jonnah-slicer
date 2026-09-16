@@ -1,5 +1,7 @@
 use egui::emath::Numeric as _;
 
+use audio::RatioExt;
+
 use crate::audio::{self, calculate_num_samples};
 
 pub const STEM_HEIGHT: f32 = 200.0;
@@ -85,11 +87,11 @@ impl From<crate::project::Stem> for LiveStem {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct LiveProject {
     sample_rate: crate::project::SampleRate,
     stems: Vec<LiveStem>,
-    bpm_changes: Vec<crate::audio::BPMChange>,
+    timing: audio::Timing,
 }
 
 impl std::convert::TryFrom<crate::project::Project> for LiveProject {
@@ -99,13 +101,13 @@ impl std::convert::TryFrom<crate::project::Project> for LiveProject {
         let crate::project::Project {
             sample_rate,
             stems,
-            bpm_changes,
+            timing,
         } = project;
 
         Ok(Self {
             sample_rate,
             stems: stems.into_iter().map(|v| v.into()).collect(),
-            bpm_changes,
+            timing,
         })
     }
 }
@@ -115,26 +117,13 @@ impl LiveProject {
         let Self {
             sample_rate,
             stems,
-            bpm_changes,
+            timing,
         } = self;
 
         crate::project::Project {
             sample_rate: *sample_rate,
             stems: stems.iter().map(|stem| stem.stem.clone()).collect(),
-            bpm_changes: bpm_changes.clone(),
-        }
-    }
-}
-
-impl Default for LiveProject {
-    fn default() -> Self {
-        Self {
-            sample_rate: Default::default(),
-            stems: Default::default(),
-            bpm_changes: vec![crate::audio::BPMChange {
-                time_point: crate::audio::TimePoint::default(),
-                bpm: 160.0,
-            }],
+            timing: timing.clone(),
         }
     }
 }
@@ -317,17 +306,14 @@ impl eframe::App for JonnahSlicer<'_> {
 
                     let use_ableton_midi = true;
 
-                    let bpm_changes = if use_ableton_midi {
+                    let timing = if use_ableton_midi {
                         // ableton midi clips are at 120bpm and ignore bpm changes afaik
-                        &[crate::audio::BPMChange {
-                            time_point: crate::audio::TimePoint::default(),
-                            bpm: 120.0,
-                        }]
+                        &crate::audio::Timing::default()
                     } else {
-                        self.project.bpm_changes.as_slice()
+                        &self.project.timing
                     };
 
-                    let Ok(midi) = crate::slices_from_midi(&bytes, bpm_changes) else {
+                    let Ok(midi) = crate::slices_from_midi(&bytes, timing) else {
                         eprintln!("failed to parse midi file {}", file_path.display());
                         continue;
                     };
@@ -357,19 +343,25 @@ impl eframe::App for JonnahSlicer<'_> {
         if self.input_state.scroll_delta.x != 0.0
             || (self.input_state.shift_pressed && self.input_state.scroll_delta.y != 0.0)
         {
-            const HORIZONTAL_SCROLL_SENSITIVITY: f64 = 0.1 / 4.0;
-            const VERTICAL_SCROLL_SENSITIVITY: f64 = 0.1;
+            let vertical_scroll_sensitivity = num_rational::Ratio::new(1, 4);
+            let horizontal_scroll_sensitivity = num_rational::Ratio::new(1, 10);
 
-            let diff = self.input_state.scroll_delta.x as f64 * HORIZONTAL_SCROLL_SENSITIVITY
-                + self.input_state.scroll_delta.y as f64
-                    * if self.input_state.shift_pressed {
-                        VERTICAL_SCROLL_SENSITIVITY
-                    } else {
-                        0.0
-                    };
+            let x = self.input_state.scroll_delta.x as i64;
+            let y = self.input_state.scroll_delta.y as i64;
+
+            let vertical = num_rational::Ratio::from_integer(y) * vertical_scroll_sensitivity;
+
+            let horizontal = horizontal_scroll_sensitivity * num_rational::Ratio::from_integer(x);
+
+            let diff = horizontal
+                + if self.input_state.shift_pressed {
+                    vertical
+                } else {
+                    0.into()
+                };
 
             self.display_start =
-                (self.display_start + crate::audio::TimePoint::new(0, -diff)).clamped_to_zero();
+                (self.display_start + audio::TimePoint::from(-diff)).clamped_to_zero();
         }
 
         egui::Panel::top("top_panel").show(ctx, |ui| {
@@ -474,7 +466,7 @@ impl eframe::App for JonnahSlicer<'_> {
 
                     if ui.button("Export All Stems").clicked() {
                         for stem in &self.project.stems {
-                            if let Err(e) = export_stem(self.default_export_dir(), stem, &self.project.bpm_changes) {
+                            if let Err(e) = export_stem(self.default_export_dir(), stem, &self.project.timing) {
                                 eprintln!("failed to export all stems: {e}");
                             }
                         }
@@ -491,7 +483,7 @@ impl eframe::App for JonnahSlicer<'_> {
 
             ui.separator();
 
-            let display_length = (8.0 * self.zoom_level) as i64;
+            let display_length = num_rational::Ratio::new(8 * (256.0 * self.zoom_level).round() as i64, 256);
 
             egui::ScrollArea::vertical()
                 .scroll_source(if self.input_state.shift_pressed {
@@ -501,7 +493,7 @@ impl eframe::App for JonnahSlicer<'_> {
                 })
                 .show(ui, |ui| {
                     let end_time_point =
-                        self.display_start + crate::audio::TimePoint::new(display_length, 0.0);
+                        self.display_start + display_length.trunc();
 
                     // Draw measures labels
                     {
@@ -510,10 +502,10 @@ impl eframe::App for JonnahSlicer<'_> {
                             egui::Sense::click(),
                         );
 
-                        let start = f64::from(self.display_start);
-                        let end = (self.display_start.measure + display_length) as f64;
+                        let start = self.display_start.to_f64();
+                        let end = self.display_start.to_integer() as f64 + display_length.to_f64();
 
-                        let mut i = self.display_start.ceil() as f64;
+                        let mut i = self.display_start.ceil().to_f64();
                         while i < end {
                             let tx = (i - start) / (end - start);
                             let pos = egui::pos2(rect.min.x + tx as f32 * rect.width(), rect.min.y);
@@ -541,7 +533,7 @@ impl eframe::App for JonnahSlicer<'_> {
                                 egui::Layout::top_down_justified(egui::Align::Center),
                                 |ui| {
                                     if ui.button("Export").clicked() {
-                                        export_stem(&export_dir, stem, &self.project.bpm_changes).expect("bad export");
+                                        export_stem(&export_dir, stem, &self.project.timing).expect("bad export");
                                     }
 
                                     ui.horizontal(|ui| {
@@ -581,7 +573,7 @@ impl eframe::App for JonnahSlicer<'_> {
                             let (_rect, event) = draw_stem(
                                 ui,
                                 stem,
-                                &self.project.bpm_changes,
+                                &self.project.timing,
                                 &self.input_state,
                                 self.display_start,
                                 end_time_point,
@@ -605,7 +597,7 @@ impl eframe::App for JonnahSlicer<'_> {
                                                 slice.time_point,
                                                 self.project.sample_rate,
                                                 1,
-                                                &self.project.bpm_changes,
+                                                &self.project.timing,
                                             ) else {
                                                 return false;
                                             };
@@ -621,13 +613,13 @@ impl eframe::App for JonnahSlicer<'_> {
                                         let start_sample_index = start
                                             .samples_from_start(
                                                 audio.sample_rate(),
-                                                &self.project.bpm_changes,
+                                                &self.project.timing,
                                             )
                                             .unwrap_or(0);
                                         let end_sample_index = end
                                             .samples_from_start(
                                                 audio.sample_rate(),
-                                                &self.project.bpm_changes,
+                                                &self.project.timing,
                                             )
                                             .unwrap_or(0);
 
@@ -661,10 +653,12 @@ impl eframe::App for JonnahSlicer<'_> {
                                     }
                                 }
                                 Some(StemEvent::LeftClick(sample_clicked)) => {
+                                    println!("clicked at {sample_clicked} samples");
+
                                     let Ok(time_point) = crate::audio::TimePoint::from_sample(
                                         sample_clicked,
                                         self.project.sample_rate.0,
-                                        &self.project.bpm_changes,
+                                        &self.project.timing,
                                     ) else {
                                         eprintln!(
                                             "failed to get time point from sample {sample_clicked}"
@@ -681,7 +675,7 @@ impl eframe::App for JonnahSlicer<'_> {
                                     let Ok(time_point) = crate::audio::TimePoint::from_sample(
                                         sample_clicked,
                                         self.project.sample_rate.0,
-                                        &self.project.bpm_changes,
+                                        &self.project.timing,
                                     ) else {
                                         eprintln!(
                                             "failed to get time point from sample {sample_clicked}"
@@ -692,7 +686,7 @@ impl eframe::App for JonnahSlicer<'_> {
                                     const DELETE_DISTANCE: f64 = 0.15;
 
                                     stem.stem.slices.0.retain(|slice| {
-                                        f64::from(slice.time_point - time_point).abs()
+                                        (slice.time_point - time_point).to_f64().abs()
                                             > DELETE_DISTANCE
                                     });
                                 }
@@ -745,11 +739,13 @@ enum StemEvent {
 fn draw_stem(
     ui: &mut egui::Ui,
     live_stem: &LiveStem,
-    bpm_changes: &[crate::audio::BPMChange],
+    timing: &audio::Timing,
     input_state: &InputState,
     start_time: crate::audio::TimePoint,
     end_time: crate::audio::TimePoint,
 ) -> Result<(egui::Rect, Option<StemEvent>), crate::Error> {
+    let bpm_changes = timing.bpm_changes();
+
     let (rect, response) = ui.allocate_exact_size(
         egui::Vec2::new(ui.available_width(), STEM_HEIGHT),
         egui::Sense::click(),
@@ -768,7 +764,7 @@ fn draw_stem(
         start_time,
         sample_rate,
         NUM_CHANNELS,
-        bpm_changes,
+        timing,
     )?;
 
     let end_sample = calculate_num_samples(
@@ -776,7 +772,7 @@ fn draw_stem(
         end_time,
         sample_rate,
         NUM_CHANNELS,
-        bpm_changes,
+        timing,
     )?;
 
     let visual_samples = end_sample - start_sample;
@@ -796,7 +792,7 @@ fn draw_stem(
 
     if let Some(audio) = &live_stem.audio {
         let num_samples = end_sample - start_sample;
-        let starting_sample = start_time.samples_from_start(audio.sample_rate(), bpm_changes)?;
+        let starting_sample = start_time.samples_from_start(audio.sample_rate(), timing)?;
 
         // TODO: Move this somewhere else?
         let visual_density = 6000;
@@ -822,16 +818,13 @@ fn draw_stem(
     });
 
     let measure_stroke = egui::Stroke::new(2.0f32, egui::Color32::DARK_BLUE.linear_multiply(0.7));
-    for i in start_time.measure..end_time.measure {
+    for i in start_time.to_integer()..end_time.to_integer() {
         let measure_sample_index = calculate_num_samples(
             Default::default(),
-            crate::audio::TimePoint {
-                measure: i,
-                submeasure: 0.0,
-            },
+            crate::audio::TimePoint::from_measure(i),
             sample_rate,
             NUM_CHANNELS,
-            bpm_changes,
+            timing,
         )?;
 
         if measure_sample_index < start_sample || end_sample < measure_sample_index {
@@ -863,7 +856,7 @@ fn draw_stem(
             bpm_change.time_point,
             sample_rate,
             NUM_CHANNELS,
-            bpm_changes,
+            timing,
         )?;
 
         if sample < start_sample || end_sample < sample {
@@ -893,7 +886,7 @@ fn draw_stem(
             slice.time_point,
             sample_rate,
             NUM_CHANNELS,
-            bpm_changes,
+            timing,
         )?;
 
         if sample < start_sample || end_sample < sample {
@@ -960,7 +953,7 @@ fn draw_stem(
 fn export_stem(
     export_dir: impl AsRef<std::path::Path>,
     live_stem: &LiveStem,
-    bpm_changes: &[crate::audio::BPMChange],
+    timing: &audio::Timing,
 ) -> Result<(), crate::Error> {
     let export_dir = export_dir.as_ref();
 
@@ -985,7 +978,8 @@ fn export_stem(
         // remember why
         1, // audio.num_channels(),
         &slices.0,
-        bpm_changes,
+        timing,
+        audio.num_samples_per_channel(),
     )?;
     let cuts = audio.cuts_from_sample_counts(starting_sample, &cuts)?;
 

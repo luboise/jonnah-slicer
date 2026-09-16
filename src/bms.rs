@@ -1,18 +1,4 @@
-impl TryFrom<crate::audio::TimePoint> for bms_rs::bms::command::time::ObjTime {
-    type Error = crate::Error;
-
-    fn try_from(value: crate::audio::TimePoint) -> Result<Self, Self::Error> {
-        // TODO: Make time points store the values based on fractions instead
-        let numerator = (((value.submeasure) * 4.0) as u64) + 1;
-        let denominator = 4;
-
-        let time =
-            bms_rs::bms::command::time::ObjTime::new(value.measure as u64, numerator, denominator)
-                .ok_or_else(|| format!("failed to create ObjTime from TimePoint {value:?}"))?;
-
-        Ok(time)
-    }
-}
+use crate::audio::RatioExt;
 
 impl TryFrom<crate::audio::BPMChange> for bms_rs::bms::model::obj::BpmChangeObj {
     type Error = crate::Error;
@@ -21,7 +7,7 @@ impl TryFrom<crate::audio::BPMChange> for bms_rs::bms::model::obj::BpmChangeObj 
         let crate::audio::BPMChange { time_point, bpm } = value;
 
         Ok(Self {
-            time: time_point.try_into()?,
+            time: time_point.to_objtime()?,
             bpm: bpm.try_into()?,
         })
     }
@@ -34,7 +20,7 @@ impl TryFrom<crate::project::Project> for bms_rs::bms::model::Bms {
         let crate::project::Project {
             sample_rate: _,
             stems,
-            bpm_changes,
+            timing: bpm_changes,
         } = value;
 
         let mut bpm_changes = bpm_changes.into_iter();
@@ -61,7 +47,8 @@ impl TryFrom<crate::project::Project> for bms_rs::bms::model::Bms {
         let mut wav_files = std::collections::HashMap::new();
         let mut notes = bms_rs::bms::model::Notes::default();
 
-        for (channel, stem) in stems.iter().enumerate() {
+        // TODO: Let users mark audio files as BGM or Notes, then use this channel var
+        for (_channel, stem) in stems.iter().enumerate() {
             // let note_channel_id = [b'1', base62::encode(channel as u64 + 1).as_bytes()[0]]
             //     .try_into()
             //     .map_err(|e| format!("bad input: {e:#?}"))?;
@@ -91,7 +78,7 @@ impl TryFrom<crate::project::Project> for bms_rs::bms::model::Bms {
                 wav_files.insert(wav_obj_id, wav_path.into());
 
                 notes.push_bgm::<bms_rs::bms::command::channel::mapper::KeyLayoutBeat>(
-                    slice.time_point.try_into()?,
+                    slice.time_point.to_objtime()?,
                     wav_obj_id,
                 );
 

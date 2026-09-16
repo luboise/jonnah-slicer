@@ -6,11 +6,13 @@ pub mod project;
 
 pub use app::JonnahSlicer;
 
+use audio::RatioExt;
+
 pub type Error = Box<dyn std::error::Error>;
 
 pub(crate) fn slices_from_midi(
     bytes: &[u8],
-    bpm_changes: &[audio::BPMChange],
+    timing: &audio::Timing,
 ) -> Result<Vec<project::Slice>, Error> {
     use midi_reader_writer::midly_0_5::exports::{MidiMessage, TrackEventKind};
 
@@ -34,10 +36,7 @@ pub(crate) fn slices_from_midi(
             } => match message {
                 MidiMessage::NoteOn { key: _, vel: _ } => {
                     slices.push(project::Slice {
-                        time_point: audio::TimePoint::from_time(
-                            microseconds as f64 / 1_000_000.0,
-                            bpm_changes,
-                        )?,
+                        time_point: audio::TimePoint::from_time(microseconds, timing)?,
                     });
                 }
                 MidiMessage::NoteOff { key: _, vel: _ }

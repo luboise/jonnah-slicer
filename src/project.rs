@@ -91,7 +91,7 @@ pub struct Project {
     #[serde(default)]
     pub sample_rate: SampleRate,
     pub stems: Vec<Stem>,
-    pub bpm_changes: Vec<crate::audio::BPMChange>,
+    pub timing: crate::audio::Timing,
 }
 
 pub fn normalise_project_path(path: impl AsRef<std::path::Path>) -> std::path::PathBuf {
