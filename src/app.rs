@@ -630,7 +630,7 @@ impl eframe::App for JonnahSlicer<'_> {
                                             stem.stem.starting_keysound =
                                                 match stem.stem.starting_keysound {
                                                     Some(_) => None,
-                                                    None => Some(0),
+                                                    None => Some(1),
                                                 };
                                         }
                                         if let Some(starting_keysound) =
@@ -1163,7 +1163,7 @@ fn draw_stem(
             egui::Align2::LEFT_BOTTOM,
             format!(
                 "{:0>2}",
-                base62::encode(i as u64 + live_stem.stem.starting_keysound.unwrap_or(0))
+                base62::encode(i as u64 + live_stem.stem.starting_keysound.unwrap_or(1))
             ),
             egui::FontId::default(),
             SLICE_COLOUR,

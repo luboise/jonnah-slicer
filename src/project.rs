@@ -63,7 +63,7 @@ impl Stem {
     pub fn from_audio_path(audio_path: impl AsRef<std::path::Path>) -> Self {
         let audio_path = audio_path.as_ref().to_owned();
 
-        crate::project::Stem {
+        Self {
             audio_path,
             slices: crate::project::Slices::default(),
             starting_keysound: None,
