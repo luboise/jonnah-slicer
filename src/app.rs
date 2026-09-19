@@ -459,7 +459,7 @@ impl eframe::App for JonnahSlicer<'_> {
 
                     ui.add_space(100.0);
 
-                    ui.add(egui::Slider::new(&mut self.group_colour_opacity, 0.0..=1.0));
+                    ui.add(egui::Slider::new(&mut self.group_colour_opacity, 0.0..=1.0).max_decimals(2).text("Group Opacity"));
 
                     if let Some(audio_player) = &mut self.audio_player {
                         if ui
@@ -649,13 +649,27 @@ impl eframe::App for JonnahSlicer<'_> {
                                     group.hash(&mut hasher);
                                     let hash = hasher.finish();
 
+                                    let hue = (hash & 0xffff) as f32 / 65535.0;
+
+                                    let saturation_ratio = ((hash >> 16) & 0xff) as f32 / 255.0;
+                                    let value_ratio = ((hash >> 24) & 0xff) as f32 / 255.0;
+
+                                    egui::ecolor::Hsva::new(
+                                        hue, 
+                                        0.5 + saturation_ratio * 0.3,
+                                        0.6 + value_ratio * 0.25,
+                                        1.0
+                                        ).into()
+
+                                    /* old code for rgb from hash instead
                                     let colour: u64 = hash % (256 * 256 * 256);
 
                                     let r = (colour & 0xff) as u8;
-                                    let g = ((colour >> 8) & 0xff) as u8;
                                     let b = ((colour >> 16) & 0xff) as u8;
 
-                                    egui::Color32::from_rgba_premultiplied(r, g, b, 255)
+                                    // egui::Color32::from_rgba_premultiplied(r, g, b, 255)
+                                    */
+
                                 };
 
                                 BASE_BACKGROUND_COLOR.lerp_to_gamma(colour, group_colour_opacity)
