@@ -151,11 +151,11 @@ pub fn save_project(
     let parent = save_path.parent().ok_or("unable to get parent path")?;
 
     if !parent.exists() {
-        println!("creating project dir {}", parent.display());
+        log::info!("creating project dir {}", parent.display());
         std::fs::create_dir_all(parent)?;
     }
 
-    println!("saving project to {}", save_path.display());
+    log::info!("saving project to {}", save_path.display());
     serde_json::to_writer_pretty(
         std::fs::OpenOptions::new()
             .create(true)

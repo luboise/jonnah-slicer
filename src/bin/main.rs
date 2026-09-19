@@ -12,8 +12,8 @@ struct Args {
 // When compiling natively:
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {
-    env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
-    let args = Args::parse();
+    let logging_mutex = jonnah_slicer::logging::init()
+        .map_err(|_| eframe::Error::AppCreation("failed to initialise logger".into()))?;
 
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -30,10 +30,16 @@ fn main() -> eframe::Result {
 
         ..Default::default()
     };
+
     eframe::run_native(
         "jonnah-slicer",
         native_options,
-        Box::new(|cc| Ok(Box::new(jonnah_slicer::JonnahSlicer::new(cc)))),
+        Box::new(|cc| {
+            Ok(Box::new(jonnah_slicer::JonnahSlicer::new(
+                cc,
+                logging_mutex,
+            )))
+        }),
     )
 }
 

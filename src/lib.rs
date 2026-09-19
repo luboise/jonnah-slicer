@@ -2,11 +2,12 @@ mod app;
 mod audio;
 mod audio_player;
 mod bms;
+pub mod logging;
 pub mod project;
 
 pub use app::JonnahSlicer;
 
-use audio::RatioExt;
+use audio::RatioExt as _;
 
 pub type Error = Box<dyn std::error::Error>;
 

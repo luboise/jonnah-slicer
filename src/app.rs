@@ -82,6 +82,9 @@ pub struct JonnahSlicer<'a> {
     #[serde(skip)]
     refresh_project: bool,
 
+    #[serde(skip)]
+    previous_diagnostic: crate::logging::LogState,
+
     // slices gathered from dropped midi files
     #[serde(skip)]
     midi_file_slices: Vec<crate::project::Slice>,
@@ -174,14 +177,14 @@ impl Default for JonnahSlicer<'_> {
                 crate::project::SampleRate::default(),
             ) {
                 Ok(v) => {
-                    println!(
+                    log::info!(
                         "initialised audio player @ {}hz",
                         crate::project::SampleRate::default().0,
                     );
                     Some(v)
                 }
                 Err(e) => {
-                    eprintln!("failed to initialise audio engine: {e}");
+                    log::error!("failed to initialise audio engine: {e}");
                     None
                 }
             },
@@ -191,13 +194,14 @@ impl Default for JonnahSlicer<'_> {
             midi_file_slices: Default::default(),
             group_colour_opacity: 0.5,
             refresh_project: true,
+            previous_diagnostic: Default::default(),
         }
     }
 }
 
 impl JonnahSlicer<'_> {
     /// Called once before the first frame.
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, logging_mutex: crate::logging::LogState) -> Self {
         // This is also where you can customize the look and feel of egui using
         // `cc.egui_ctx.set_visuals` and `cc.egui_ctx.set_fonts`.
 
@@ -220,6 +224,9 @@ impl JonnahSlicer<'_> {
         app.audio_player.as_ref().inspect(|player| {
             player.set_volume(app.audio_volume);
         });
+
+        app.previous_diagnostic = logging_mutex;
+
         app
     }
 
@@ -333,7 +340,7 @@ impl eframe::App for JonnahSlicer<'_> {
                     .unwrap_or_else(|| path.canonicalize().unwrap_or(path));
 
                 let Some(extension) = file_path.extension() else {
-                    eprintln!(
+                    log::error!(
                         "file {} has no extension. skipping this file",
                         file_path.display()
                     );
@@ -348,7 +355,7 @@ impl eframe::App for JonnahSlicer<'_> {
                     });
                 } else if extension == "mid" || extension == "midi" {
                     let Ok(bytes) = std::fs::read(&file_path) else {
-                        eprintln!("failed to read file {}", file_path.display());
+                        log::error!("failed to read file {}", file_path.display());
                         continue;
                     };
 
@@ -362,7 +369,7 @@ impl eframe::App for JonnahSlicer<'_> {
                     };
 
                     let Ok(midi) = crate::slices_from_midi(&bytes, timing) else {
-                        eprintln!("failed to parse midi file {}", file_path.display());
+                        log::error!("failed to parse midi file {}", file_path.display());
                         continue;
                     };
 
@@ -474,7 +481,10 @@ impl eframe::App for JonnahSlicer<'_> {
             }
 
             ui.vertical(|ui| {
-                ui.heading(format!("JonnahSlicer v{}", env!("CARGO_PKG_VERSION")));
+                ui.horizontal(|ui|{
+                    ui.heading(format!("JonnahSlicer v{}", env!("CARGO_PKG_VERSION")));
+                    ui.heading(format!("JonnahSlicer v{}", env!("CARGO_PKG_VERSION")));
+                });
 
                 ui.horizontal(|ui| {
                     if ui.button("⟳").on_hover_text("Refresh the project, ordering stems by group (Key: F5)").clicked() || self.input_state.f5_pressed {
@@ -496,14 +506,14 @@ impl eframe::App for JonnahSlicer<'_> {
                         let new_audio_player =
                             match crate::audio_player::AudioPlayer::new(self.project.sample_rate) {
                                 Ok(audio_player) => {
-                                    println!(
+                                    log::info!(
                                         "updated audio player sample rate to {}",
                                         self.project.sample_rate.0
                                     );
                                     Some(audio_player)
                                 }
                                 Err(e) => {
-                                    eprintln!(
+                                    log::error!(
                                         "failed to set audio player sample rate to {}: {e}",
                                         self.project.sample_rate.0
                                     );
@@ -545,7 +555,7 @@ impl eframe::App for JonnahSlicer<'_> {
                             };
 
                             if let Err(e) = wrap_export_stem() {
-                                eprintln!("failed to export all stems: {e}");
+                                log::error!("failed to export all stems: {e}");
                                 break;
                             }
                         }
@@ -553,7 +563,7 @@ impl eframe::App for JonnahSlicer<'_> {
 
                     if ui.button("Generate BMS File").clicked() {
                         if let Err(e) = export_bms_file(self.default_export_dir().join("out.bms"), &self.project.as_project()) {
-                            eprintln!("failed to export BMS file: {e}");
+                            log::error!("failed to export BMS file: {e}");
                         }
                     }
                 });
@@ -845,19 +855,19 @@ impl eframe::App for JonnahSlicer<'_> {
                                                         audio_player.add_audio(playback);
                                                     }
                                                 } else {
-                                                    eprintln!("bad channel");
+                                                    log::error!("bad channel");
                                                 }
                                             }
                                         }
                                         StemEvent::LeftClick(sample_clicked) => {
-                                            println!("clicked at {sample_clicked} samples");
+                                            log::trace!("clicked at {sample_clicked} samples");
 
                                             let Ok(time_point) = crate::audio::TimePoint::from_sample(
                                                 sample_clicked,
                                                 self.project.sample_rate.0,
                                                 &self.project.timing,
                                             ) else {
-                                                eprintln!(
+                                                log::error!(
                                                     "failed to get time point from sample {sample_clicked}"
                                                 );
                                                 return;
@@ -874,7 +884,7 @@ impl eframe::App for JonnahSlicer<'_> {
                                                 self.project.sample_rate.0,
                                                 &self.project.timing,
                                             ) else {
-                                                eprintln!(
+                                                log::error!(
                                                     "failed to get time point from sample {sample_clicked}"
                                                 );
                                                 return;
@@ -912,7 +922,7 @@ impl eframe::App for JonnahSlicer<'_> {
                                 });
 
                                 if let Err(e) = audio::export_stem(&export_dir, stem_prefix, &audio, &slices, &self.project.timing) {
-                                    eprintln!("bad export: {e}");
+                                    log::error!("bad export: {e}");
                                 }
                             }
                         } else {
@@ -927,14 +937,14 @@ impl eframe::App for JonnahSlicer<'_> {
                             let Some(stem_prefix) = stem.stem.audio_path.file_stem().and_then(|v|v.to_str()) else {panic!("")};
 
                             if let Err(e) = audio::export_stem(&export_dir, stem_prefix, audio, &slices, &self.project.timing) {
-                                eprintln!("bad export: {e}");
+                                log::error!("bad export: {e}");
                             }
                         }
                     }
 
                     if let Some(stem_i) = stem_to_delete {
                         if stem_i >= self.project.stems.len() {
-                            eprintln!("Failed to remove stem {stem_i}: out of range");
+                            log::error!("Failed to remove stem {stem_i}: out of range");
                         }
 
                         self.project.stems.remove(stem_i);

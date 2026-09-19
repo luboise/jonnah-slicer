@@ -101,7 +101,7 @@ impl AudioPlayer {
                     });
 
                     let Ok(volume) = volume.read().map(|v| *v) else {
-                        eprintln!("failed to fetch audio player volume");
+                        log::error!("failed to fetch audio player volume");
                         return;
                     };
 
@@ -110,7 +110,7 @@ impl AudioPlayer {
                     }
                 },
                 move |err| {
-                    eprintln!("{err}");
+                    log::error!("{err}");
                 },
                 None, // None=blocking, Some(Duration)=timeout
             )
@@ -130,7 +130,7 @@ impl AudioPlayer {
 
     pub fn add_audio(&self, playback: AudioPlayback) {
         if playback.stream.channels.is_empty() {
-            eprintln!("empty audio buffer submitted to output stream");
+            log::error!("empty audio buffer submitted to output stream");
             return;
         }
         if playback.cursor
@@ -142,7 +142,7 @@ impl AudioPlayer {
                 .max()
                 .unwrap_or(0)
         {
-            eprintln!("cursor is past playback length");
+            log::error!("cursor is past playback length");
         }
 
         self.audio_files

@@ -475,7 +475,7 @@ impl AudioFile {
                 }) {
                 Ok(v) => v,
                 Err(e) => {
-                    eprintln!(
+                    log::error!(
                         "not enough samples to fulfill all slices, dropped {}: {e}",
                         frame_counts.len() - i
                     );
