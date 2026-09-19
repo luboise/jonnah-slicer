@@ -911,7 +911,9 @@ impl eframe::App for JonnahSlicer<'_> {
                                     acc
                                 });
 
-                                audio::export_stem(&export_dir, stem_prefix, &audio, &slices, &self.project.timing).expect("bad export");
+                                if let Err(e) = audio::export_stem(&export_dir, stem_prefix, &audio, &slices, &self.project.timing) {
+                                    eprintln!("bad export: {e}");
+                                }
                             }
                         } else {
                             // if not in a group, just get the details from the one stem
@@ -924,7 +926,9 @@ impl eframe::App for JonnahSlicer<'_> {
                             let audio = &[audio];
                             let Some(stem_prefix) = stem.stem.audio_path.file_stem().and_then(|v|v.to_str()) else {panic!("")};
 
-                            audio::export_stem(&export_dir, stem_prefix, audio, slices, &self.project.timing).expect("bad export");
+                            if let Err(e) = audio::export_stem(&export_dir, stem_prefix, audio, &slices, &self.project.timing) {
+                                eprintln!("bad export: {e}");
+                            }
                         }
                     }
 

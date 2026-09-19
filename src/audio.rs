@@ -273,7 +273,7 @@ impl Timing {
                 }
 
                 if l.time_point <= tp && tp <= r.time_point {
-                    let num_beats = (tp - l.time_point) * (BEATS_PER_MEASURE as i64);
+                    let num_beats = (tp - l.time_point) * BEATS_PER_MEASURE as i64;
                     let beat_length = 60.0 / l.bpm;
 
                     let diff_dur = num_beats.to_f64() * beat_length;
@@ -580,6 +580,10 @@ pub fn export_stem(
     slices: &crate::project::Slices,
     timing: &Timing,
 ) -> Result<(), crate::Error> {
+    if slices.slices().is_empty() {
+        return Err("zero slices provided for export".into());
+    }
+
     let export_dir = export_dir.as_ref();
 
     let mut audio_it = audio.iter();
@@ -617,7 +621,11 @@ pub fn export_stem(
         all_cuts.push(cuts);
     }
 
-    let max_slice_count = all_cuts.iter().map(|cuts| cuts.len()).max().unwrap();
+    let max_slice_count = all_cuts
+        .iter()
+        .map(|cuts| cuts.len())
+        .max()
+        .ok_or("no max")?;
 
     let mut buf = vec![];
 
