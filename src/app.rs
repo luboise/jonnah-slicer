@@ -3,6 +3,7 @@ use std::hash::{Hash as _, Hasher as _};
 use egui::{Button, emath::Numeric as _};
 
 use audio::RatioExt;
+use log::warn;
 
 use crate::audio::{self, calculate_num_samples};
 
@@ -15,6 +16,7 @@ struct InputState {
     pub rmb_down: bool,
     pub scroll_delta: egui::Vec2,
     pub shift_pressed: bool,
+    pub zoom_delta: egui::Vec2,
     pub home_pressed: bool,
     pub g_pressed: bool,
     pub l_pressed: bool,
@@ -38,6 +40,7 @@ impl InputState {
                 rmb_down: i.pointer.button_down(egui::PointerButton::Secondary),
                 scroll_delta: i.smooth_scroll_delta(),
                 shift_pressed: i.modifiers.shift,
+                zoom_delta: i.zoom_delta_2d(),
                 home_pressed: i.consume_key(egui::Modifiers::NONE, egui::Key::Home),
                 g_pressed: i.consume_key(egui::Modifiers::NONE, egui::Key::G),
                 l_pressed: i.consume_key(egui::Modifiers::NONE, egui::Key::L),
@@ -385,11 +388,15 @@ impl eframe::App for JonnahSlicer<'_> {
             self.display_start = Default::default();
         }
 
+        if self.input_state.zoom_delta.y != 1.0 {
+            self.zoom_level *=  1.0 + (0.4 * (self.input_state.zoom_delta.y - 1.0));
+        }
+
         if self.input_state.scroll_delta.x != 0.0
             || (self.input_state.shift_pressed && self.input_state.scroll_delta.y != 0.0)
         {
-            let vertical_scroll_sensitivity = num_rational::Ratio::new(1, 10);
-            let horizontal_scroll_sensitivity = num_rational::Ratio::new(1, 10);
+            let vertical_scroll_sensitivity = num_rational::Ratio::new(1, 67);
+            let horizontal_scroll_sensitivity = num_rational::Ratio::new(1, 67);
 
             let x = self.input_state.scroll_delta.x as i64;
             let y = self.input_state.scroll_delta.y as i64;
@@ -398,12 +405,13 @@ impl eframe::App for JonnahSlicer<'_> {
 
             let horizontal = horizontal_scroll_sensitivity * num_rational::Ratio::from_integer(x);
 
-            let diff = horizontal
+            let diff = num_rational::Ratio::new((self.zoom_level * 1000.0) as i64, 1000) *
+                (horizontal
                 + if self.input_state.shift_pressed {
                     vertical
                 } else {
                     0.into()
-                };
+                });
 
             self.display_start =
                 (self.display_start + audio::TimePoint::from(-diff)).clamped_to_zero();
