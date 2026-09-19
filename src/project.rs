@@ -49,9 +49,23 @@ pub struct Stem {
     pub starting_keysound: Option<u64>,
     #[serde(default)]
     pub ty: StemType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
 }
 
 impl Stem {
+    pub fn from_audio_path(audio_path: impl AsRef<std::path::Path>) -> Self {
+        let audio_path = audio_path.as_ref().to_owned();
+
+        crate::project::Stem {
+            audio_path,
+            slices: crate::project::Slices::default(),
+            starting_keysound: None,
+            ty: crate::project::StemType::default(),
+            group: None,
+        }
+    }
+
     pub fn slices(&self) -> &Slices {
         &self.slices
     }

@@ -1,4 +1,6 @@
-use egui::{emath::Numeric as _};
+use std::hash::{Hash as _, Hasher as _};
+
+use egui::emath::Numeric as _;
 
 use audio::RatioExt;
 
@@ -58,6 +60,7 @@ pub struct JonnahSlicer<'a> {
 
     zoom_level: f32,
     audio_volume: f32,
+    group_colour_opacity: f32,
 
     // slices gathered from dropped midi files
     #[serde(skip)]
@@ -166,6 +169,7 @@ impl Default for JonnahSlicer<'_> {
             drag_and_drop: egui::DragAndDrop::default(),
             project_status: Default::default(),
             midi_file_slices: Default::default(),
+            group_colour_opacity: 0.5,
         }
     }
 }
@@ -298,12 +302,7 @@ impl eframe::App for JonnahSlicer<'_> {
 
                 if extension == "wav" {
                     self.project.stems.push(LiveStem {
-                        stem: crate::project::Stem {
-                            audio_path: file_path,
-                            slices: crate::project::Slices::default(),
-                            starting_keysound: None,
-                            ty: crate::project::StemType::default(),
-                        },
+                        stem: crate::project::Stem::from_audio_path(file_path),
                         audio: None,
                         locked: false,
                     });
@@ -460,6 +459,8 @@ impl eframe::App for JonnahSlicer<'_> {
 
                     ui.add_space(100.0);
 
+                    ui.add(egui::Slider::new(&mut self.group_colour_opacity, 0.0..=1.0));
+
                     if let Some(audio_player) = &mut self.audio_player {
                         if ui
                             .add(
@@ -611,11 +612,61 @@ impl eframe::App for JonnahSlicer<'_> {
                                     if ui.button(lock_text).on_hover_text("Prevent slices from being altered on this stem (Key: L)").clicked() {
                                         stem.locked = !stem.locked;
                                     }
+
+                                    {
+                                        let mut remove_from_group = false;
+
+                                        if let Some(group) = &mut stem.stem.group { 
+                                            ui.horizontal(|ui|{ 
+                                                let text_edit = egui::TextEdit::singleline(group).desired_width(100.0);
+                                                ui.add(text_edit);
+
+                                                if ui.button("X").clicked() {
+                                                    remove_from_group = true;
+                                                }
+                                            });
+                                        }
+                                        else {
+                                            if ui.button("Set Group").clicked() {
+                                                stem.stem.group = Some("Group X".into()); 
+                                            }
+                                        } 
+
+                                        if remove_from_group {
+                                            stem.stem.group = None;
+                                        }
+                                    }
                                 },
                             );
 
+
+                            let group_colour_opacity = self.group_colour_opacity.clamp(0.0, 1.0);
+
+                            const BASE_BACKGROUND_COLOR: egui::Color32 = egui::Color32::from_gray(35);
+                            let background_colour = if let Some(group) = &stem.stem.group {
+                                let colour = {
+                                    let mut hasher = std::hash::DefaultHasher::new();
+                                    group.hash(&mut hasher);
+                                    let hash = hasher.finish();
+
+                                    let colour: u64 = hash % (256 * 256 * 256);
+
+                                    let r = (colour & 0xff) as u8;
+                                    let g = ((colour >> 8) & 0xff) as u8;
+                                    let b = ((colour >> 16) & 0xff) as u8;
+
+                                    egui::Color32::from_rgba_premultiplied(r, g, b, 255)
+                                };
+
+                                BASE_BACKGROUND_COLOR.lerp_to_gamma(colour, group_colour_opacity)
+                            } else {
+                                BASE_BACKGROUND_COLOR
+                            };
+
+
                             let (rect, event) = draw_stem(
                                 ui,
+                                background_colour,
                                 stem,
                                 &self.project.timing,
                                 &self.input_state,
@@ -623,6 +674,9 @@ impl eframe::App for JonnahSlicer<'_> {
                                 end_time_point,
                             )
                             .unwrap();
+
+                            if let Some(col) = &stem.stem.group{
+                            }
 
                             if stem.locked{ 
                                 ui.painter().rect_filled(rect, 0, egui::Color32::from_rgba_premultiplied(0, 0, 0, 125));
@@ -793,6 +847,7 @@ enum StemEvent {
 
 fn draw_stem(
     ui: &mut egui::Ui,
+    background_color: egui::Color32,
     live_stem: &LiveStem,
     timing: &audio::Timing,
     input_state: &InputState,
@@ -833,7 +888,7 @@ fn draw_stem(
     let visual_samples = end_sample - start_sample;
 
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 0.0, egui::Color32::from_gray(35));
+    painter.rect_filled(rect, 0.0, background_color);
 
     const SLICE_COLOUR: egui::Color32 = egui::Color32::WHITE;
     let stroke = egui::Stroke::new(3.0f32, SLICE_COLOUR);
