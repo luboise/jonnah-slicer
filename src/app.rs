@@ -396,7 +396,7 @@ impl eframe::App for JonnahSlicer<'_> {
         }
 
         if self.input_state.zoom_delta.y != 1.0 {
-            self.zoom_level *=  1.0 + (0.4 * (self.input_state.zoom_delta.y - 1.0));
+            self.zoom_level *= 1.0 + (0.4 * (self.input_state.zoom_delta.y - 1.0));
         }
 
         if self.input_state.scroll_delta.x != 0.0
@@ -412,13 +412,13 @@ impl eframe::App for JonnahSlicer<'_> {
 
             let horizontal = horizontal_scroll_sensitivity * num_rational::Ratio::from_integer(x);
 
-            let diff = num_rational::Ratio::new((self.zoom_level * 1000.0) as i64, 1000) *
-                (horizontal
-                + if self.input_state.shift_pressed {
-                    vertical
-                } else {
-                    0.into()
-                });
+            let diff = num_rational::Ratio::new((self.zoom_level * 1000.0) as i64, 1000)
+                * (horizontal
+                    + if self.input_state.shift_pressed {
+                        vertical
+                    } else {
+                        0.into()
+                    });
 
             self.display_start =
                 (self.display_start + audio::TimePoint::from(-diff)).clamped_to_zero();
@@ -483,7 +483,19 @@ impl eframe::App for JonnahSlicer<'_> {
             ui.vertical(|ui| {
                 ui.horizontal(|ui|{
                     ui.heading(format!("JonnahSlicer v{}", env!("CARGO_PKG_VERSION")));
-                    ui.heading(format!("JonnahSlicer v{}", env!("CARGO_PKG_VERSION")));
+
+                    let mut diagnostic = self.previous_diagnostic.lock().unwrap();
+
+                    if diagnostic.as_ref().is_some_and(|(time, _)| {
+                         std::time::SystemTime::now().duration_since(*time).unwrap_or(std::time::Duration::from_secs(10))
+                             >= std::time::Duration::from_secs(10) 
+                    }) {
+                        *diagnostic = None;
+                    } 
+
+                    diagnostic.as_ref().inspect(|(_, msg)|{
+                        ui.label(msg);
+                    });
                 });
 
                 ui.horizontal(|ui| {
@@ -1066,13 +1078,18 @@ fn draw_stem(
         );
     }
 
-    let slices = live_stem.stem.slices.iter().enumerate().filter_map(|(slice_i, slice)| {
-        if !(start_time..=end_time).contains(&slice.time_point) {
-            return None;
-        }
+    let slices = live_stem
+        .stem
+        .slices
+        .iter()
+        .enumerate()
+        .filter_map(|(slice_i, slice)| {
+            if !(start_time..=end_time).contains(&slice.time_point) {
+                return None;
+            }
 
-        Some((slice_i, slice.clone()))
-    });
+            Some((slice_i, slice.clone()))
+        });
 
     let measure_stroke = egui::Stroke::new(2.0f32, egui::Color32::DARK_BLUE.linear_multiply(0.7));
     for i in start_time.to_integer()..end_time.to_integer() {
@@ -1136,8 +1153,6 @@ fn draw_stem(
 
         painter.line_segment(points, bpm_change_stroke);
     }
-
-
 
     for (i, slice) in slices {
         let sample = calculate_num_samples(
