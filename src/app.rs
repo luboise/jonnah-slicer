@@ -1,6 +1,6 @@
 use std::hash::{Hash as _, Hasher as _};
 
-use egui::emath::Numeric as _;
+use egui::{Button, emath::Numeric as _};
 
 use audio::RatioExt;
 
@@ -695,9 +695,8 @@ impl eframe::App for JonnahSlicer<'_> {
                                                 stem.stem.group = Some("Group X".into()); 
                                             }
 
-                                            if ui.button("Delete Stem ⚠️").clicked() {
+                                            if ui.add_enabled(!stem.locked, Button::new("Delete Stem ⚠️")).clicked() {
                                                 stem_to_delete = Some(stem_i);
-
                                             }
                                         } 
 
