@@ -881,11 +881,11 @@ impl eframe::App for JonnahSlicer<'_> {
                                                 return;
                                             };
 
-                                            const DELETE_DISTANCE: f64 = 0.15;
+                                            const DELETE_DISTANCE: f64 = 0.075;
 
                                             stem.stem.slices.0.retain(|slice| {
                                                 (slice.time_point - time_point).to_f64().abs()
-                                                    > DELETE_DISTANCE
+                                                    > DELETE_DISTANCE * (self.zoom_level as f64)
                                             });
                                         }
                                         StemEvent::PlayAudio(_) => ()
