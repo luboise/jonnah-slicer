@@ -20,11 +20,9 @@ pub fn slices_to_sample_counts(
                 bpm_changes,
             )
         })
-        // Add on a fake one at the end
-        .chain(std::iter::once(Ok(usize::MAX)))
+        // Add on a fake one at the end equal to the end of the file
+        .chain(std::iter::once(Ok(num_samples)))
         .collect::<Result<Vec<_>, _>>()?;
-
-    // len sample_counts = len slices
 
     let starting_sample = calculate_num_samples(
         TimePoint::default(),
@@ -34,18 +32,13 @@ pub fn slices_to_sample_counts(
         bpm_changes,
     )?;
 
-    let mut sample_counts = sample_counts
+    let sample_counts = sample_counts
         .clone()
         .into_iter()
         .zip(sample_counts.into_iter().skip(1))
-        .map(|(l, r)| r - l)
-        .collect::<Vec<_>>();
+        .map(|(l, r)| r.checked_sub(l).ok_or("bad sub in sample counts"))
+        .collect::<Result<Vec<_>, _>>()?;
 
-    let up_to_last = sample_counts.iter().take(sample_counts.len() - 1).sum();
-
-    *sample_counts.last_mut().ok_or("bad")? = num_samples
-        .checked_sub(up_to_last)
-        .ok_or("bad sub from end")?;
     Ok((starting_sample, sample_counts))
 }
 
@@ -476,7 +469,8 @@ impl AudioFile {
 
         for (i, num_frames) in frame_counts.iter().enumerate() {
             let num_to_read = num_frames * usize::from(self.num_channels());
-            let Ok(cut) = samples_slice
+
+            let cut = match samples_slice
                 .get(num_samples..num_samples + num_to_read)
                 .ok_or_else(|| {
                     format!(
@@ -484,13 +478,15 @@ impl AudioFile {
                         num_samples + num_to_read,
                         samples_slice.len()
                     )
-                })
-            else {
-                eprintln!(
-                    "not enough samples to fulfill all slices, dropped {}",
-                    frame_counts.len() - i
-                );
-                break;
+                }) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!(
+                        "not enough samples to fulfill all slices, dropped {}: {e}",
+                        frame_counts.len() - i
+                    );
+                    break;
+                }
             };
 
             num_samples += num_to_read;
