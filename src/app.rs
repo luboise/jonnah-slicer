@@ -388,7 +388,7 @@ impl eframe::App for JonnahSlicer<'_> {
         if self.input_state.scroll_delta.x != 0.0
             || (self.input_state.shift_pressed && self.input_state.scroll_delta.y != 0.0)
         {
-            let vertical_scroll_sensitivity = num_rational::Ratio::new(1, 4);
+            let vertical_scroll_sensitivity = num_rational::Ratio::new(1, 10);
             let horizontal_scroll_sensitivity = num_rational::Ratio::new(1, 10);
 
             let x = self.input_state.scroll_delta.x as i64;
