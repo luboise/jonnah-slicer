@@ -18,19 +18,30 @@ struct InputState {
     pub home_pressed: bool,
     pub g_pressed: bool,
     pub l_pressed: bool,
+    pub number_pressed: Option<u8>,
 }
 
 impl InputState {
     pub fn from_ctx(ctx: &egui::Context) -> Self {
-        ctx.input_mut(|i| Self {
-            mouse_pos: i.pointer.latest_pos(),
-            lmb_down: i.pointer.button_down(egui::PointerButton::Primary),
-            rmb_down: i.pointer.button_down(egui::PointerButton::Secondary),
-            scroll_delta: i.smooth_scroll_delta(),
-            shift_pressed: i.modifiers.shift,
-            home_pressed: i.consume_key(egui::Modifiers::NONE, egui::Key::Home),
-            g_pressed: i.consume_key(egui::Modifiers::NONE, egui::Key::G),
-            l_pressed: i.consume_key(egui::Modifiers::NONE, egui::Key::L),
+        ctx.input_mut(|i| {
+            let first_number_pressed = (0..9).find_map(|num| {
+                i.consume_key(
+                    egui::Modifiers::NONE,
+                    egui::Key::from_name(&format!("{}", (b'0' + num) as char))?,
+                )
+                .then_some(num)
+            });
+            Self {
+                mouse_pos: i.pointer.latest_pos(),
+                lmb_down: i.pointer.button_down(egui::PointerButton::Primary),
+                rmb_down: i.pointer.button_down(egui::PointerButton::Secondary),
+                scroll_delta: i.smooth_scroll_delta(),
+                shift_pressed: i.modifiers.shift,
+                home_pressed: i.consume_key(egui::Modifiers::NONE, egui::Key::Home),
+                g_pressed: i.consume_key(egui::Modifiers::NONE, egui::Key::G),
+                l_pressed: i.consume_key(egui::Modifiers::NONE, egui::Key::L),
+                number_pressed: first_number_pressed,
+            }
         })
     }
 }
@@ -401,13 +412,22 @@ impl eframe::App for JonnahSlicer<'_> {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
             ui.label("Snapping: ");
-            for snap_v in [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 64, 128] {
+            const SNAPPINGS: [u16; 12] = [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 64, 128];
+
+            for snap_v in SNAPPINGS {
                 let button = ui.button(format!("1/{snap_v}"));
 
                 if self.slice_snapping.as_measure_denom() == snap_v {
                     button.highlight();
                 } else {
-                    if button.clicked() {
+                    if let Some(num) = self.input_state.number_pressed {
+                        //    [1, 2, 3, ..., 9, 0]
+                        // => [0, 1, 2, 3, ..., 8, 9]
+                        let num = (num + 9) % 10;
+
+                        self.slice_snapping =
+                            crate::audio::Snapping::Measure(SNAPPINGS[num as usize]);
+                    } else if button.clicked() {
                         self.slice_snapping = crate::audio::Snapping::Measure(snap_v);
                     }
                 }
