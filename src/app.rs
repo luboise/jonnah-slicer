@@ -614,7 +614,7 @@ impl eframe::App for JonnahSlicer<'_> {
                                 },
                             );
 
-                            let (_rect, event) = draw_stem(
+                            let (rect, event) = draw_stem(
                                 ui,
                                 stem,
                                 &self.project.timing,
@@ -624,6 +624,9 @@ impl eframe::App for JonnahSlicer<'_> {
                             )
                             .unwrap();
 
+                            if stem.locked{ 
+                                ui.painter().rect_filled(rect, 0, egui::Color32::from_rgba_premultiplied(0, 0, 0, 125));
+                            }
 
                             if let Some(event) = event && 
                                 // we need hover to make locking/re-locking work
