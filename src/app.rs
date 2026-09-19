@@ -608,7 +608,7 @@ impl eframe::App for JonnahSlicer<'_> {
                                         "🔓"
                                     };
 
-                                    if ui.button(lock_text).clicked() {
+                                    if ui.button(lock_text).on_hover_text("Prevent slices from being altered on this stem (Key: L)").clicked() {
                                         stem.locked = !stem.locked;
                                     }
                                 },
