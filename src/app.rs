@@ -554,7 +554,6 @@ impl eframe::App for JonnahSlicer<'_> {
                     if ui.button("Generate BMS File").clicked() {
                         if let Err(e) = export_bms_file(self.default_export_dir().join("out.bms"), &self.project.as_project()) {
                             eprintln!("failed to export BMS file: {e}");
-
                         }
                     }
                 });
@@ -1053,10 +1052,12 @@ fn draw_stem(
         );
     }
 
-    let slices = live_stem.stem.slices.iter().filter_map(|slice| {
-        (start_time..=end_time)
-            .contains(&slice.time_point)
-            .then_some(slice.clone())
+    let slices = live_stem.stem.slices.iter().enumerate().filter_map(|(slice_i, slice)| {
+        if !(start_time..=end_time).contains(&slice.time_point) {
+            return None;
+        }
+
+        Some((slice_i, slice.clone()))
     });
 
     let measure_stroke = egui::Stroke::new(2.0f32, egui::Color32::DARK_BLUE.linear_multiply(0.7));
@@ -1122,7 +1123,9 @@ fn draw_stem(
         painter.line_segment(points, bpm_change_stroke);
     }
 
-    for (i, slice) in slices.enumerate() {
+
+
+    for (i, slice) in slices {
         let sample = calculate_num_samples(
             Default::default(),
             slice.time_point,
