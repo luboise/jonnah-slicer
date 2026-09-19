@@ -18,6 +18,7 @@ struct InputState {
     pub home_pressed: bool,
     pub g_pressed: bool,
     pub l_pressed: bool,
+    pub f5_pressed: bool,
     pub number_pressed: Option<u8>,
 }
 
@@ -40,6 +41,7 @@ impl InputState {
                 home_pressed: i.consume_key(egui::Modifiers::NONE, egui::Key::Home),
                 g_pressed: i.consume_key(egui::Modifiers::NONE, egui::Key::G),
                 l_pressed: i.consume_key(egui::Modifiers::NONE, egui::Key::L),
+                f5_pressed: i.consume_key(egui::Modifiers::NONE, egui::Key::F5),
                 number_pressed: first_number_pressed,
             }
         })
@@ -72,6 +74,10 @@ pub struct JonnahSlicer<'a> {
     zoom_level: f32,
     audio_volume: f32,
     group_colour_opacity: f32,
+
+    // whether the project should be refreshed at the start of the next frame
+    #[serde(skip)]
+    refresh_project: bool,
 
     // slices gathered from dropped midi files
     #[serde(skip)]
@@ -181,6 +187,7 @@ impl Default for JonnahSlicer<'_> {
             project_status: Default::default(),
             midi_file_slices: Default::default(),
             group_colour_opacity: 0.5,
+            refresh_project: true,
         }
     }
 }
@@ -242,6 +249,25 @@ impl eframe::App for JonnahSlicer<'_> {
 
     /// Called each time the UI needs repainting, which may be many times per second.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.refresh_project {
+            use std::cmp::Ordering::*;
+
+            self.refresh_project = false;
+
+            self.project.stems.sort_by(|stem1, stem2| {
+                let g1 = &stem1.stem.group;
+                let g2 = &stem2.stem.group;
+
+                if g1.is_some() && g2.is_none() {
+                    Less
+                } else if g1.is_none() && g2.is_some() {
+                    Greater
+                } else {
+                    g1.cmp(g2).reverse()
+                }
+            });
+        }
+
         self.input_state = InputState::from_ctx(ctx);
         if let Some(project_path) = &self.project_path {
             match &self.project_status {
@@ -443,6 +469,10 @@ impl eframe::App for JonnahSlicer<'_> {
                 ui.heading(format!("JonnahSlicer v{}", env!("CARGO_PKG_VERSION")));
 
                 ui.horizontal(|ui| {
+                    if ui.button("⟳").on_hover_text("Refresh the project, ordering stems by group (Key: F5)").clicked() || self.input_state.f5_pressed {
+                        self.refresh_project = true;
+                    }
+
                     // The central panel the region left after adding TopPanel's and SidePanel's
                     ui.add(egui::Slider::new(&mut self.zoom_level, 0.0..=8.0).text("Zoom"));
                     if ui
@@ -496,8 +526,19 @@ impl eframe::App for JonnahSlicer<'_> {
 
                     if ui.button("Export All Stems").clicked() {
                         for stem in &self.project.stems {
-                            if let Err(e) = export_stem(self.default_export_dir(), stem, &self.project.timing) {
+                            let wrap_export_stem = || { 
+                                let audio = stem.audio.as_ref().ok_or("no stem")?;
+                                let stem_prefix = stem.stem.audio_path.file_stem()
+                                    .and_then(|v| v.to_str())
+                                    .ok_or("bad stem prefix")?;
+
+                                let slices = &stem.stem.slices;
+                                export_stem(self.default_export_dir(),stem_prefix, audio, slices, &self.project.timing)
+                            };
+
+                            if let Err(e) = wrap_export_stem() {
                                 eprintln!("failed to export all stems: {e}");
+                                break;
                             }
                         }
                     }
@@ -562,8 +603,15 @@ impl eframe::App for JonnahSlicer<'_> {
                                 [(ui.available_width() * 0.4).min(200.0), STEM_HEIGHT].into(),
                                 egui::Layout::top_down_justified(egui::Align::Center),
                                 |ui| {
-                                    if ui.button("Export").clicked() {
-                                        export_stem(&export_dir, stem, &self.project.timing).expect("bad export");
+                                    if ui.button("Export").clicked() && let Some(audio) = stem.audio.as_ref()
+                                        && let Some(stem_prefix) = stem.stem.audio_path.file_stem().and_then(|v|v.to_str())
+                                    {
+                                        // TODO: Log "bad stem" if audio missing "bad stem"
+                                        // TODO: Log "bad audio" if audio path missing
+                                        
+                                        let slices = &stem.stem.slices;
+
+                                        export_stem(&export_dir, stem_prefix, audio, slices, &self.project.timing).expect("bad export");
                                     }
 
                                     ui.horizontal(|ui| {
@@ -1096,25 +1144,12 @@ fn draw_stem(
 
 fn export_stem(
     export_dir: impl AsRef<std::path::Path>,
-    live_stem: &LiveStem,
+    stem_prefix: &str,
+    audio: &audio::AudioFile,
+    slices: &crate::project::Slices,
     timing: &audio::Timing,
 ) -> Result<(), crate::Error> {
     let export_dir = export_dir.as_ref();
-
-    let Some(audio) = live_stem.audio.as_ref() else {
-        return Err("bad stem".into());
-    };
-
-    let slices: &crate::project::Slices = &live_stem.stem.slices;
-
-    let Some(wav_file_stem) = live_stem
-        .stem
-        .audio_path
-        .file_stem()
-        .and_then(|v| v.to_str())
-    else {
-        return Err("bad file stem".into());
-    };
 
     let (starting_sample, cuts) = audio::slices_to_sample_counts(
         audio.sample_rate().into(),
@@ -1132,7 +1167,7 @@ fn export_stem(
     }
 
     for (i, cut) in cuts.into_iter().enumerate() {
-        let file_name = format!("{wav_file_stem}_{i:03}.wav");
+        let file_name = format!("{stem_prefix}_{i:03}.wav");
 
         if let Err(e) = wavers::write(export_dir.join(&file_name), cut, audio.sample_rate(), 2) {
             return Err(format!("failed to export stem {file_name}: {e}").into());
