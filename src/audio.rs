@@ -49,13 +49,6 @@ pub enum Snapping {
 }
 
 impl Snapping {
-    pub fn simplify(self) -> Self {
-        match self {
-            Self::Measure(m) => Self::Beat(m * BEATS_PER_MEASURE as u16),
-            Self::Beat(b) => Self::Beat(b),
-        }
-    }
-
     pub fn as_measure_denom(self) -> u16 {
         match self {
             Self::Measure(m) => m,
@@ -71,6 +64,7 @@ impl Default for Snapping {
 }
 
 pub type TimePoint = num_rational::Ratio<i64>;
+
 pub trait RatioExt: Sized {
     fn from_measure(measure: i64) -> Self;
     fn from_submeasure(measure: i64, numerator: i64, denominator: i64) -> Self;
@@ -588,9 +582,29 @@ pub fn export_stem(
 ) -> Result<(), crate::Error> {
     let export_dir = export_dir.as_ref();
 
+    let mut audio_it = audio.iter();
+
+    let (sample_rate, num_channels) = audio_it
+        .next()
+        .ok_or("no audio files provided")
+        .map(|v| (v.sample_rate(), v.num_channels()))?;
+
+    if let Some(bad_file) =
+        audio_it.find(|a| a.sample_rate() != sample_rate || a.num_channels() != num_channels)
+    {
+        return Err(format!(
+            "audio files mismatch: {}Ch {}Hz != {num_channels}Ch {sample_rate}Hz",
+            bad_file.num_channels(),
+            bad_file.sample_rate(),
+        )
+        .into());
+    }
+
+    let mut all_cuts = Vec::with_capacity(audio.len());
+
     for audio in audio {
         let (starting_sample, cuts) = slices_to_sample_counts(
-            audio.sample_rate().into(),
+            sample_rate.into(),
             // TODO: Use proper number of channels here, this was hardcoded to 1 before but I can't
             // remember why
             1, // audio.num_channels(),
@@ -600,17 +614,48 @@ pub fn export_stem(
         )?;
         let cuts = audio.cuts_from_sample_counts(starting_sample, &cuts)?;
 
-        if !export_dir.exists() {
-            std::fs::create_dir_all(export_dir)?;
+        all_cuts.push(cuts);
+    }
+
+    let max_slice_count = all_cuts.iter().map(|cuts| cuts.len()).max().unwrap();
+
+    let mut buf = vec![];
+
+    if !export_dir.exists() {
+        std::fs::create_dir_all(export_dir)?;
+    }
+
+    for i in 0..max_slice_count {
+        // reset the buffer
+        buf.fill(0f32);
+
+        let mut max_len = 0;
+
+        for cuts in &all_cuts {
+            let Some(slice) = cuts.get(i) else {
+                continue;
+            };
+
+            if buf.len() < slice.len() {
+                buf.resize(slice.len(), 0f32);
+            }
+
+            max_len = max_len.max(slice.len());
+
+            for (i, sample) in slice.iter().enumerate() {
+                buf[i] += *sample;
+            }
         }
 
-        for (i, cut) in cuts.into_iter().enumerate() {
-            let file_name = format!("{stem_prefix}_{i:03}.wav");
+        let file_name = format!("{stem_prefix}_{i:03}.wav");
 
-            if let Err(e) = wavers::write(export_dir.join(&file_name), cut, audio.sample_rate(), 2)
-            {
-                return Err(format!("failed to export stem {file_name}: {e}").into());
-            }
+        if let Err(e) = wavers::write(
+            export_dir.join(&file_name),
+            &buf[0..max_len],
+            sample_rate,
+            num_channels,
+        ) {
+            return Err(format!("failed to export stem {file_name}: {e}").into());
         }
     }
 

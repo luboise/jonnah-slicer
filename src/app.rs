@@ -592,7 +592,9 @@ impl eframe::App for JonnahSlicer<'_> {
 
                     let export_dir = self.default_export_dir();
 
-                    for stem in &mut self.project.stems {
+                    let mut stem_to_export = None;
+
+                    for (stem_i, stem) in  self.project.stems.iter_mut().enumerate() {
                         let full_stem_dims = [ui.available_width(), STEM_HEIGHT];
 
                         ui.allocate_ui_with_layout(
@@ -603,15 +605,8 @@ impl eframe::App for JonnahSlicer<'_> {
                                 [(ui.available_width() * 0.4).min(200.0), STEM_HEIGHT].into(),
                                 egui::Layout::top_down_justified(egui::Align::Center),
                                 |ui| {
-                                    if ui.button("Export").clicked() && let Some(audio) = stem.audio.as_ref()
-                                        && let Some(stem_prefix) = stem.stem.audio_path.file_stem().and_then(|v|v.to_str())
-                                    {
-                                        // TODO: Log "bad stem" if audio missing "bad stem"
-                                        // TODO: Log "bad audio" if audio path missing
-                                        
-                                        let slices = &stem.stem.slices;
-
-                                        audio::export_stem(&export_dir, stem_prefix, &[audio], slices, &self.project.timing).expect("bad export");
+                                    if ui.button("Export").clicked() {
+                                        stem_to_export = Some(stem_i);
                                     }
 
                                     ui.horizontal(|ui| {
@@ -886,6 +881,42 @@ impl eframe::App for JonnahSlicer<'_> {
                         },
                     );
                     }
+
+ 
+                    if let Some(stem_i) = stem_to_export {
+                        let stem = self.project.stems.get(stem_i).expect("stem i not found");
+
+                        if let Some(group) = &stem.stem.group {
+                            // if in a group, find all stems in that group and export them together
+                            let stems = self.project.stems.iter()
+                                .filter(|stem| stem.stem.group.as_ref().is_some_and(|g| g == group)).collect::<Vec<_>>();
+
+                            if !stems.is_empty() {
+                                let stem_prefix = group;
+                                let audio = stems.iter().filter_map(|stem|stem.audio.as_ref()).collect::<Vec<_>>();
+                                let slices = stems.iter().fold(crate::project::Slices::default(), |mut acc, x|{
+                                    acc.union(&x.stem.slices);
+                                    acc
+                                });
+
+                                audio::export_stem(&export_dir, stem_prefix, &audio, &slices, &self.project.timing).expect("bad export");
+                            }
+                        } else {
+                            // if not in a group, just get the details from the one stem
+                            
+                            // TODO: Log "bad stem" if audio missing "bad stem"
+                            // TODO: Log "bad audio" if audio path missing
+                            
+                            let Some(audio) = stem.audio.as_ref() else {panic!("")};
+                            let slices = &stem.stem.slices;
+                            let audio = &[audio];
+                            let Some(stem_prefix) = stem.stem.audio_path.file_stem().and_then(|v|v.to_str()) else {panic!("")};
+
+                            audio::export_stem(&export_dir, stem_prefix, audio, slices, &self.project.timing).expect("bad export");
+                        }
+
+                    }
+
                 });
 
             let rect = ui.available_rect_before_wrap();

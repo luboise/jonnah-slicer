@@ -33,6 +33,12 @@ impl Slices {
     pub fn iter(&self) -> std::slice::Iter<'_, Slice> {
         self.0.iter()
     }
+
+    pub fn union(&mut self, other: &Self) {
+        for slice in other.iter() {
+            self.insert(slice.clone());
+        }
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Default, Debug, Clone, Copy)]
