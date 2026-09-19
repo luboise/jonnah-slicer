@@ -35,11 +35,20 @@ impl Slices {
     }
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Default, Debug, Clone, Copy)]
+pub enum StemType {
+    Note,
+    #[default]
+    BGM,
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct Stem {
     pub audio_path: std::path::PathBuf,
     pub slices: Slices,
     pub starting_keysound: Option<u64>,
+    #[serde(default)]
+    pub ty: StemType,
 }
 
 impl Stem {

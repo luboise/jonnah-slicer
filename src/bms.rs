@@ -1,4 +1,4 @@
-use crate::audio::RatioExt;
+use crate::audio::RatioExt as _;
 
 impl TryFrom<crate::audio::BPMChange> for bms_rs::bms::model::obj::BpmChangeObj {
     type Error = crate::Error;
@@ -44,16 +44,14 @@ impl TryFrom<crate::project::Project> for bms_rs::bms::model::Bms {
             )?;
         }
 
+        let mut num_note_channels = 0;
+
         let mut wav_files = std::collections::HashMap::new();
         let mut notes = bms_rs::bms::model::Notes::default();
 
-        // TODO: Let users mark audio files as BGM or Notes, then use this channel var
-        for (_channel, stem) in stems.iter().enumerate() {
-            // let note_channel_id = [b'1', base62::encode(channel as u64 + 1).as_bytes()[0]]
-            //     .try_into()
-            //     .map_err(|e| format!("bad input: {e:#?}"))?;
-
-            let obj_id = stem.starting_keysound.unwrap_or(0);
+        for stem in stems {
+            // base62 keysounds start at 01 not 00
+            let obj_id = stem.starting_keysound.unwrap_or(1);
 
             // TODO: Make this not fail?
             let (file_stem, file_extension) = (
@@ -77,16 +75,29 @@ impl TryFrom<crate::project::Project> for bms_rs::bms::model::Bms {
                 let wav_obj_id = bms_rs::bms::command::ObjId::try_from(&encoded, true)?;
                 wav_files.insert(wav_obj_id, wav_path.into());
 
-                notes.push_bgm::<bms_rs::bms::command::channel::mapper::KeyLayoutBeat>(
-                    slice.time_point.to_objtime()?,
-                    wav_obj_id,
-                );
+                match stem.ty {
+                    crate::project::StemType::Note if num_note_channels < 8 => {
+                        let note_channel_id = [b'1', b'1' + num_note_channels]
+                            .try_into()
+                            .map_err(|e| format!("bad input: {e:#?}"))?;
 
-                // notes.push_note(bms_rs::bms::model::obj::WavObj {
-                //     offset: slice.time_point.try_into()?,
-                //     channel_id: note_channel_id,
-                //     wav_id: wav_obj_id,
-                // });
+                        notes.push_note(bms_rs::bms::model::obj::WavObj {
+                            offset: slice.time_point.to_objtime()?,
+                            channel_id: note_channel_id,
+                            wav_id: wav_obj_id,
+                        });
+                    }
+                    crate::project::StemType::Note | crate::project::StemType::BGM => {
+                        notes.push_bgm::<bms_rs::bms::command::channel::mapper::KeyLayoutBeat>(
+                            slice.time_point.to_objtime()?,
+                            wav_obj_id,
+                        );
+                    }
+                }
+            }
+
+            if matches!(stem.ty, crate::project::StemType::Note) {
+                num_note_channels = num_note_channels.saturating_add(1);
             }
         }
 

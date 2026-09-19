@@ -295,6 +295,7 @@ impl eframe::App for JonnahSlicer<'_> {
                             audio_path: file_path,
                             slices: crate::project::Slices::default(),
                             starting_keysound: None,
+                            ty: crate::project::StemType::default(),
                         },
                         audio: None,
                     });
@@ -567,6 +568,32 @@ impl eframe::App for JonnahSlicer<'_> {
                                             );
                                         }
                                     });
+
+
+                                    {
+                                        use crate::project::StemType;
+
+                                    let button_text = match stem.stem.ty {
+                                        StemType::Note => "Note",
+                                        StemType::BGM => "BGM"
+                                    };
+
+                                    let button_colour = match stem.stem.ty {
+                                        StemType::Note => egui::Color32::BLUE,
+                                        StemType::BGM => egui::Color32::RED
+                                    }
+                                    .lerp_to_gamma(egui::Color32::WHITE, 0.3);
+
+                                    let button = egui::Button::new(button_text).fill(button_colour);
+
+                                    if ui.add(button).clicked() {
+                                        stem.stem.ty = match stem.stem.ty {
+                                            StemType::Note => StemType::BGM,
+                                            StemType::BGM => StemType::Note
+                                        }
+                                    }
+                                    }
+
                                 },
                             );
 
