@@ -577,41 +577,44 @@ pub fn calculate_timepoints_distance(
     let r = times[1];
 
     Ok((r - l).as_secs_f64())
+}
 
-    /*
-    let prefirst_bpm_change = bpm_changes
-        .iter()
-        .position(|bpm_change| bpm_change.time_point <= start)
-        .ok_or("no start time point")?;
+pub fn export_stem(
+    export_dir: impl AsRef<std::path::Path>,
+    stem_prefix: &str,
+    audio: &[&AudioFile],
+    slices: &crate::project::Slices,
+    timing: &Timing,
+) -> Result<(), crate::Error> {
+    let export_dir = export_dir.as_ref();
 
-    let final_bpm_change = bpm_changes
-        .iter()
-        .rposition(|bpm_change| end >= bpm_change.time_point)
-        .ok_or("no end time point")?;
+    for audio in audio {
+        let (starting_sample, cuts) = slices_to_sample_counts(
+            audio.sample_rate().into(),
+            // TODO: Use proper number of channels here, this was hardcoded to 1 before but I can't
+            // remember why
+            1, // audio.num_channels(),
+            &slices.0,
+            timing,
+            audio.num_samples_per_channel(),
+        )?;
+        let cuts = audio.cuts_from_sample_counts(starting_sample, &cuts)?;
 
-    let first = [BPMChange {
-        time_point: start,
-        bpm: bpm_changes
-            .get_bpm_change_unchecked(prefirst_bpm_change)
-            .bpm,
-    }];
+        if !export_dir.exists() {
+            std::fs::create_dir_all(export_dir)?;
+        }
 
-    let last = [BPMChange {
-        time_point: end,
-        bpm: bpm_changes[final_bpm_change].bpm,
-    }];
+        for (i, cut) in cuts.into_iter().enumerate() {
+            let file_name = format!("{stem_prefix}_{i:03}.wav");
 
-    let bpm_changes = (first.iter())
-        .chain(&bpm_changes[prefirst_bpm_change + 1..=final_bpm_change])
-        .chain(&last);
+            if let Err(e) = wavers::write(export_dir.join(&file_name), cut, audio.sample_rate(), 2)
+            {
+                return Err(format!("failed to export stem {file_name}: {e}").into());
+            }
+        }
+    }
 
-    let bpm_changes = bpm_changes.clone().zip(bpm_changes.skip(1));
-
-    Ok(bpm_changes.fold(0.0, |acc, (bpm_change1, bpm_change2)| {
-        acc + f64::from(bpm_change2.time_point - bpm_change1.time_point) * 60.0 / bpm_change1.bpm
-            * BEATS_PER_MEASURE as f64
-    }))
-    */
+    Ok(())
 }
 
 pub fn calculate_num_samples(

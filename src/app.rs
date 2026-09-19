@@ -533,7 +533,7 @@ impl eframe::App for JonnahSlicer<'_> {
                                     .ok_or("bad stem prefix")?;
 
                                 let slices = &stem.stem.slices;
-                                export_stem(self.default_export_dir(),stem_prefix, audio, slices, &self.project.timing)
+                                audio::export_stem(self.default_export_dir(),stem_prefix, &[audio], slices, &self.project.timing)
                             };
 
                             if let Err(e) = wrap_export_stem() {
@@ -611,7 +611,7 @@ impl eframe::App for JonnahSlicer<'_> {
                                         
                                         let slices = &stem.stem.slices;
 
-                                        export_stem(&export_dir, stem_prefix, audio, slices, &self.project.timing).expect("bad export");
+                                        audio::export_stem(&export_dir, stem_prefix, &[audio], slices, &self.project.timing).expect("bad export");
                                     }
 
                                     ui.horizontal(|ui| {
@@ -1140,41 +1140,6 @@ fn draw_stem(
     }
 
     Ok((rect, event))
-}
-
-fn export_stem(
-    export_dir: impl AsRef<std::path::Path>,
-    stem_prefix: &str,
-    audio: &audio::AudioFile,
-    slices: &crate::project::Slices,
-    timing: &audio::Timing,
-) -> Result<(), crate::Error> {
-    let export_dir = export_dir.as_ref();
-
-    let (starting_sample, cuts) = audio::slices_to_sample_counts(
-        audio.sample_rate().into(),
-        // TODO: Use proper number of channels here, this was hardcoded to 1 before but I can't
-        // remember why
-        1, // audio.num_channels(),
-        &slices.0,
-        timing,
-        audio.num_samples_per_channel(),
-    )?;
-    let cuts = audio.cuts_from_sample_counts(starting_sample, &cuts)?;
-
-    if !export_dir.exists() {
-        std::fs::create_dir_all(export_dir)?;
-    }
-
-    for (i, cut) in cuts.into_iter().enumerate() {
-        let file_name = format!("{stem_prefix}_{i:03}.wav");
-
-        if let Err(e) = wavers::write(export_dir.join(&file_name), cut, audio.sample_rate(), 2) {
-            return Err(format!("failed to export stem {file_name}: {e}").into());
-        }
-    }
-
-    Ok(())
 }
 
 fn export_bms_file(
