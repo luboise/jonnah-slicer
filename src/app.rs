@@ -593,6 +593,7 @@ impl eframe::App for JonnahSlicer<'_> {
                     let export_dir = self.default_export_dir();
 
                     let mut stem_to_export = None;
+                    let mut stem_to_delete = None;
 
                     for (stem_i, stem) in  self.project.stems.iter_mut().enumerate() {
                         let full_stem_dims = [ui.available_width(), STEM_HEIGHT];
@@ -692,6 +693,11 @@ impl eframe::App for JonnahSlicer<'_> {
                                         else {
                                             if ui.button("Set Group").clicked() {
                                                 stem.stem.group = Some("Group X".into()); 
+                                            }
+
+                                            if ui.button("Delete Stem ⚠️").clicked() {
+                                                stem_to_delete = Some(stem_i);
+
                                             }
                                         } 
 
@@ -914,9 +920,15 @@ impl eframe::App for JonnahSlicer<'_> {
 
                             audio::export_stem(&export_dir, stem_prefix, audio, slices, &self.project.timing).expect("bad export");
                         }
-
                     }
 
+                    if let Some(stem_i) = stem_to_delete {
+                        if stem_i >= self.project.stems.len() {
+                            eprintln!("Failed to remove stem {stem_i}: out of range");
+                        }
+
+                        self.project.stems.remove(stem_i);
+                    }
                 });
 
             let rect = ui.available_rect_before_wrap();
