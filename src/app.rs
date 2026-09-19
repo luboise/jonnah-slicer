@@ -555,7 +555,9 @@ impl eframe::App for JonnahSlicer<'_> {
                     }
 
                     if ui.button("Export All Stems").clicked() {
-                        for stem in &self.project.stems {
+                        let mut exported = None;
+
+                        for stem in self.project.stems.iter().filter(|stem| !stem.stem.slices.0.is_empty()) {
                             let wrap_export_stem = || { 
                                 let audio = stem.audio.as_ref().ok_or("no stem")?;
                                 let stem_prefix = stem.stem.audio_path.file_stem()
@@ -568,8 +570,15 @@ impl eframe::App for JonnahSlicer<'_> {
 
                             if let Err(e) = wrap_export_stem() {
                                 log::error!("failed to export all stems: {e}");
+                                exported = None;
                                 break;
                             }
+
+                            *exported.get_or_insert(0usize) += 1;
+                        }
+
+                        if let Some(exported) = exported {
+                            log::info!("exported {exported} stems");
                         }
                     }
 
