@@ -3,7 +3,6 @@ use std::hash::{Hash as _, Hasher as _};
 use egui::{Button, emath::Numeric as _};
 
 use audio::RatioExt;
-use log::warn;
 
 use crate::audio::{self, calculate_num_samples};
 
@@ -21,6 +20,7 @@ struct InputState {
     pub g_pressed: bool,
     pub l_pressed: bool,
     pub f5_pressed: bool,
+    pub esc_pressed: bool,
     pub number_pressed: Option<u8>,
 }
 
@@ -45,6 +45,7 @@ impl InputState {
                 g_pressed: i.consume_key(egui::Modifiers::NONE, egui::Key::G),
                 l_pressed: i.consume_key(egui::Modifiers::NONE, egui::Key::L),
                 f5_pressed: i.consume_key(egui::Modifiers::NONE, egui::Key::F5),
+                esc_pressed: i.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
                 number_pressed: first_number_pressed,
             }
         })
@@ -80,6 +81,12 @@ pub struct JonnahSlicer<'a> {
 
     #[serde(skip)]
     quit_application: bool,
+
+    #[serde(skip)]
+    copy_from: Option<usize>,
+
+    #[serde(skip)]
+    copy_to: Option<usize>,
 
     // whether the project should be refreshed at the start of the next frame
     #[serde(skip)]
@@ -199,6 +206,8 @@ impl Default for JonnahSlicer<'_> {
             refresh_project: true,
             previous_diagnostic: Default::default(),
             quit_application: false,
+            copy_from: None,
+            copy_to: None,
         }
     }
 }
@@ -263,6 +272,24 @@ impl eframe::App for JonnahSlicer<'_> {
 
     /// Called each time the UI needs repainting, which may be many times per second.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.input_state.esc_pressed {
+            self.copy_from = None;
+            self.copy_to = None;
+        }
+
+        if let Some(copy_from) = self.copy_from.clone()
+            && let Some(copy_to) = self.copy_to {
+                if let Some(from_slices) = self.project.stems.get(copy_from)
+                .map(|live|live.stem.slices.clone()) 
+                {
+                    if let Some(to) = self.project.stems.get_mut(copy_to) {
+                        to.stem.slices.union(&from_slices);
+                    }
+                } else {
+                    log::error!("unable to copy from stem[{copy_from}]");
+                }
+            }
+
         if self.refresh_project {
             use std::cmp::Ordering::*;
 
@@ -791,6 +818,26 @@ impl eframe::App for JonnahSlicer<'_> {
                                             stem.stem.group = None;
                                         }
                                     }
+
+                                    ui.horizontal(|ui| {
+                                        let copy_text = if self.copy_from == Some(stem_i) {
+                                            "Cancel Copy"
+                                        } else if self.copy_from.is_some() {
+                                            "Paste"
+                                        } else {
+                                            "Copy"
+                                        };
+
+                                        if ui.button(copy_text).clicked() {
+                                            if self.copy_from == Some(stem_i) {
+                                                self.copy_from = None;
+                                            } else if self.copy_from.is_some() {
+                                                self.copy_to = Some(stem_i);
+                                            } else {
+                                                self.copy_from = Some(stem_i);
+                                            }
+                                        }
+                                    });
                                 },
                             );
 
