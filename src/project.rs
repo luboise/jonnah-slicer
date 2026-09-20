@@ -169,3 +169,70 @@ pub fn save_project(
 
     Ok(())
 }
+
+pub fn calculate_initial_keysounds(
+    stems: Vec<&mut Stem>,
+    wiggle_room: impl Into<u64>,
+) -> Result<(), crate::Error> {
+    let wiggle_room = wiggle_room.into();
+
+    let mut sorted = std::collections::HashMap::new();
+
+    let default_key = "".to_owned();
+
+    for stem in stems {
+        let group = stem.group.clone().unwrap_or_else(|| default_key.clone());
+        sorted.entry(group).or_insert_with(Vec::new).push(stem);
+    }
+
+    let strays = sorted.remove(&default_key).unwrap_or_default();
+
+    let mut keysound = 1;
+
+    #[expect(
+        clippy::iter_over_hash_type,
+        reason = "this won't ever run on a redundant system?"
+    )]
+    for (_, stems) in sorted {
+        let slices = stems.iter().fold(Slices::default(), |mut acc, stem| {
+            acc.union(&stem.slices);
+            acc
+        });
+
+        if slices.0.is_empty() {
+            continue;
+        }
+
+        for stem in stems {
+            stem.starting_keysound = Some(keysound);
+        }
+
+        let num_keysounds: u64 = slices.0.len().try_into()?;
+        keysound = keysound
+            .checked_add(num_keysounds + wiggle_room)
+            .ok_or("slice count overflow")?;
+    }
+
+    for stray in strays {
+        if stray.slices.0.is_empty() {
+            continue;
+        }
+
+        stray.starting_keysound = Some(keysound);
+
+        let num_keysounds: u64 = stray.slices.0.len().try_into()?;
+        keysound = keysound
+            .checked_add(num_keysounds + wiggle_room)
+            .ok_or("slice count overflow")?;
+    }
+
+    if keysound >= 62 * 62 {
+        return Err(format!(
+            "too many slices! {keysound} (max number is {})",
+            (62 * 62) - 1,
+        )
+        .into());
+    }
+
+    Ok(())
+}

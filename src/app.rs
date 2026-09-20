@@ -428,7 +428,6 @@ impl eframe::App for JonnahSlicer<'_> {
                 (self.display_start + audio::TimePoint::from(-diff)).clamped_to_zero();
         }
 
-
         if self.quit_application {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
@@ -476,6 +475,26 @@ impl eframe::App for JonnahSlicer<'_> {
                         self.quit_application = true;
                     }
                 });
+
+                ui.menu_button("Analyse", |ui| {
+                    ui.menu_button("Calculate Initial Starting Keysounds", |ui|{
+                        let wiggles = [0u64, 5, 10, 50];
+
+                        for wiggle in wiggles {
+                            if ui.button(format!("Wiggle room: {wiggle}")) .on_hover_text("Calculate the starting keysound for each stem, leaving small gaps between each one for wiggle room.\n\nThis will permanently alter your project, and should only be used ONCE to get initial keysound values for your stems.")
+                                .clicked() {
+                                let mut_stems = self.project.stems.iter_mut().map(|live| &mut live.stem).collect::<Vec<_>>();
+                                if let Err(e) = crate::project::calculate_initial_keysounds(mut_stems, wiggle) {
+                                    log::error!("failed to calculate initial keysounds: {e}");
+                                }
+                                else {
+                                    log::info!("Successfully calculated initial keysounds. Remember to save your project!");
+                                }
+                            }
+                        }
+                    })
+                });
+
                 ui.add_space(16.0);
                 egui::widgets::global_theme_preference_buttons(ui);
             });
