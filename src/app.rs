@@ -78,6 +78,9 @@ pub struct JonnahSlicer<'a> {
     audio_volume: f32,
     group_colour_opacity: f32,
 
+    #[serde(skip)]
+    quit_application: bool,
+
     // whether the project should be refreshed at the start of the next frame
     #[serde(skip)]
     refresh_project: bool,
@@ -195,6 +198,7 @@ impl Default for JonnahSlicer<'_> {
             group_colour_opacity: 0.5,
             refresh_project: true,
             previous_diagnostic: Default::default(),
+            quit_application: false,
         }
     }
 }
@@ -424,6 +428,12 @@ impl eframe::App for JonnahSlicer<'_> {
                 (self.display_start + audio::TimePoint::from(-diff)).clamped_to_zero();
         }
 
+
+        if self.quit_application {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+
+        /*
         egui::Panel::top("top_panel").show(ctx, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 // NOTE: no File->Quit on web pages!
@@ -435,7 +445,7 @@ impl eframe::App for JonnahSlicer<'_> {
                         }
 
                         if ui.button("Quit").clicked() {
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                            self.quit_application = true;
                         }
                     });
                     ui.add_space(16.0);
@@ -444,6 +454,7 @@ impl eframe::App for JonnahSlicer<'_> {
                 egui::widgets::global_theme_preference_buttons(ui);
             });
         });
+        */
 
         egui::CentralPanel::default().show(ctx, |ui| {
             self.draw_everything(ui);
@@ -451,6 +462,25 @@ impl eframe::App for JonnahSlicer<'_> {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        egui::Panel::top("top_panel").show_inside(ui, |ui|{
+            ui.horizontal_top(|ui|{
+
+                ui.menu_button("File", |ui| {
+                    if ui.button("Save").clicked() {
+                        if let Err(e) = self.save_to_disk() {
+                            log::error!("failed to save project: {e}");
+                        }
+                    }
+
+                    if ui.button("Quit").clicked() {
+                        self.quit_application = true;
+                    }
+                });
+                ui.add_space(16.0);
+                egui::widgets::global_theme_preference_buttons(ui);
+            });
+        });
+
         ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
             ui.label("Snapping: ");
             const SNAPPINGS: [u16; 12] = [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 64, 128];
