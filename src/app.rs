@@ -22,6 +22,7 @@ struct InputState {
     pub f5_pressed: bool,
     pub esc_pressed: bool,
     pub number_pressed: Option<u8>,
+    pub save_pressed: bool,
 }
 
 impl InputState {
@@ -47,6 +48,10 @@ impl InputState {
                 f5_pressed: i.consume_key(egui::Modifiers::NONE, egui::Key::F5),
                 esc_pressed: i.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
                 number_pressed: first_number_pressed,
+                save_pressed: i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    egui::Modifiers::COMMAND,
+                    egui::Key::S,
+                )),
             }
         })
     }
@@ -84,7 +89,6 @@ pub struct JonnahSlicer<'a> {
 
     #[serde(skip)]
     copy_from: Option<usize>,
-
     #[serde(skip)]
     copy_to: Option<usize>,
 
@@ -254,13 +258,639 @@ impl JonnahSlicer<'_> {
         )
     }
 
-    pub fn draw_everything(&mut self, ui: &mut egui::Ui) {}
-
     pub fn default_export_dir(&self) -> std::path::PathBuf {
         self.project_path
             .as_ref()
             .map(|v| v.join("out"))
             .unwrap_or_else(|| "./".into())
+    }
+
+    pub fn draw_top_bar(&mut self, ui: &mut egui::Ui) {
+        egui::Panel::top("top_panel").show_inside(ui, |ui|{
+            ui.horizontal_top(|ui|{
+                ui.menu_button("File", |ui| {
+                    if ui.button("Save").clicked()
+                        && let Err(e) = self.save_to_disk() {
+                            log::error!("failed to save project: {e}");
+                        }
+
+                    if ui.button("Quit").clicked() {
+                        self.quit_application = true;
+                    }
+                });
+
+                ui.menu_button("Analyse", |ui| {
+                    ui.menu_button("Calculate Initial Starting Keysounds", |ui|{
+                        let wiggles = [0u64, 5, 10, 50];
+
+                        for wiggle in wiggles {
+                            if ui.button(format!("Wiggle room: {wiggle}")) .on_hover_text("Calculate the starting keysound for each stem, leaving small gaps between each one for wiggle room.\n\nThis will permanently alter your project, and should only be used ONCE to get initial keysound values for your stems.")
+                                .clicked() {
+                                let mut_stems = self.project.stems.iter_mut().map(|live| &mut live.stem).collect::<Vec<_>>();
+                                if let Err(e) = crate::project::calculate_initial_keysounds(mut_stems, wiggle) {
+                                    log::error!("failed to calculate initial keysounds: {e}");
+                                }
+                                else {
+                                    log::info!("Successfully calculated initial keysounds. Remember to save your project!");
+                                }
+                            }
+                        }
+                    })
+                });
+
+                ui.add_space(16.0);
+                egui::widgets::global_theme_preference_buttons(ui);
+            });
+        });
+
+        ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+            ui.label("Snapping: ");
+            const SNAPPINGS: [u16; 12] = [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 64, 128];
+
+            for snap_v in SNAPPINGS {
+                let button = ui.button(format!("1/{snap_v}"));
+
+                if self.slice_snapping.as_measure_denom() == snap_v {
+                    button.highlight();
+                } else {
+                    if let Some(num) = self.input_state.number_pressed {
+                        //    [1, 2, 3, ..., 9, 0]
+                        // => [0, 1, 2, 3, ..., 8, 9]
+                        let num = (num + 9) % 10;
+
+                        self.slice_snapping =
+                            crate::audio::Snapping::Measure(SNAPPINGS[num as usize]);
+                    } else if button.clicked() {
+                        self.slice_snapping = crate::audio::Snapping::Measure(snap_v);
+                    }
+                }
+            }
+        });
+    }
+
+    pub fn draw_options(&mut self, ui: &mut egui::Ui) {
+        ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                ui.heading(format!("JonnahSlicer v{}", env!("CARGO_PKG_VERSION")));
+
+                let mut diagnostic = self.previous_diagnostic.lock().unwrap();
+
+                if diagnostic.as_ref().is_some_and(|(time, _)| {
+                    std::time::SystemTime::now()
+                        .duration_since(*time)
+                        .unwrap_or(std::time::Duration::from_secs(10))
+                        >= std::time::Duration::from_secs(10)
+                }) {
+                    *diagnostic = None;
+                }
+
+                diagnostic.as_ref().inspect(|(_, msg)| {
+                    ui.label(msg);
+                });
+            });
+
+            ui.horizontal(|ui| {
+                if ui
+                    .button("⟳")
+                    .on_hover_text("Refresh the project, ordering stems by group (Key: F5)")
+                    .clicked()
+                    || self.input_state.f5_pressed
+                {
+                    self.refresh_project = true;
+                }
+
+                // The central panel the region left after adding TopPanel's and SidePanel's
+                ui.add(egui::Slider::new(&mut self.zoom_level, 0.0..=8.0).text("Zoom"));
+                if ui
+                    .add(
+                        egui::Slider::new(
+                            &mut self.project.sample_rate,
+                            crate::project::SampleRate::MIN..=crate::project::SampleRate::MAX,
+                        )
+                        .text("Sample Rate"),
+                    )
+                    .changed()
+                {
+                    let new_audio_player =
+                        match crate::audio_player::AudioPlayer::new(self.project.sample_rate) {
+                            Ok(audio_player) => {
+                                log::info!(
+                                    "updated audio player sample rate to {}",
+                                    self.project.sample_rate.0
+                                );
+                                Some(audio_player)
+                            }
+                            Err(e) => {
+                                log::error!(
+                                    "failed to set audio player sample rate to {}: {e}",
+                                    self.project.sample_rate.0
+                                );
+                                None
+                            }
+                        };
+
+                    self.audio_player =
+                        new_audio_player.inspect(|player| player.set_volume(self.audio_volume));
+                }
+
+                ui.add_space(100.0);
+
+                ui.add(
+                    egui::Slider::new(&mut self.group_colour_opacity, 0.0..=1.0)
+                        .max_decimals(2)
+                        .text("Group Opacity"),
+                );
+
+                if let Some(audio_player) = &mut self.audio_player {
+                    if ui
+                        .add(egui::Slider::new(&mut self.audio_volume, 0.0..=1.0).text("Volume"))
+                        .changed()
+                    {
+                        audio_player.set_volume(self.audio_volume);
+                    }
+                } else {
+                    ui.colored_label(egui::Color32::RED, "audio player not initialised");
+                }
+
+                if ui.button("Export All Stems").clicked() {
+                    let mut exported = None;
+
+                    for stem in self
+                        .project
+                        .stems
+                        .iter()
+                        .filter(|stem| !stem.stem.slices.0.is_empty())
+                    {
+                        let wrap_export_stem = || {
+                            let audio = stem.audio.as_ref().ok_or("no stem")?;
+                            let stem_prefix = stem
+                                .stem
+                                .audio_path
+                                .file_stem()
+                                .and_then(|v| v.to_str())
+                                .ok_or("bad stem prefix")?;
+
+                            let slices = &stem.stem.slices;
+                            audio::export_stem(
+                                self.default_export_dir(),
+                                stem_prefix,
+                                &[audio],
+                                slices,
+                                &self.project.timing,
+                            )
+                        };
+
+                        if let Err(e) = wrap_export_stem() {
+                            log::error!("failed to export all stems: {e}");
+                            exported = None;
+                            break;
+                        }
+
+                        *exported.get_or_insert(0usize) += 1;
+                    }
+
+                    if let Some(exported) = exported {
+                        log::info!("exported {exported} stems");
+                    }
+                }
+
+                if ui.button("Generate BMS File").clicked() {
+                    if let Err(e) = export_bms_file(
+                        self.default_export_dir().join("out.bms"),
+                        &self.project.as_project(),
+                    ) {
+                        log::error!("failed to export BMS file: {e}");
+                    }
+                }
+            });
+        });
+    }
+
+    fn draw_main_ui(&mut self, ui: &mut egui::Ui) {
+        let display_length =
+            num_rational::Ratio::new(8 * (256.0 * self.zoom_level).round() as i64, 256);
+
+        let end_time_point = self.display_start + display_length.trunc();
+
+        // Draw measures labels
+        {
+            let (rect, _response) = ui.allocate_exact_size(
+                egui::Vec2::new(ui.available_width(), 20.0),
+                egui::Sense::click(),
+            );
+
+            let start = self.display_start.to_f64();
+            let end = self.display_start.to_integer() as f64 + display_length.to_f64();
+
+            let mut i = self.display_start.ceil().to_f64();
+            while i < end {
+                let tx = (i - start) / (end - start);
+                let pos = egui::pos2(rect.min.x + tx as f32 * rect.width(), rect.min.y);
+
+                ui.put(
+                    egui::Rect::from_pos(pos).expand(20.0),
+                    egui::Label::new(i.to_string()),
+                );
+
+                i += 1.0;
+            }
+        }
+
+        let export_dir = self.default_export_dir();
+
+        let mut stem_to_export = None;
+        let mut stem_to_delete = None;
+
+        for (stem_i, stem) in self.project.stems.iter_mut().enumerate() {
+            let full_stem_dims = [ui.available_width(), STEM_HEIGHT];
+
+            ui.allocate_ui_with_layout(
+                full_stem_dims.into(),
+                egui::Layout::left_to_right(egui::Align::Max),
+                |ui| {
+                    ui.allocate_ui_with_layout(
+                        [(ui.available_width() * 0.4).min(200.0), STEM_HEIGHT].into(),
+                        egui::Layout::top_down_justified(egui::Align::Center),
+                        |ui| {
+                            if ui.button("Export").clicked() {
+                                stem_to_export = Some(stem_i);
+                            }
+
+                            ui.horizontal(|ui| {
+                                ui.label("Start: ");
+
+                                let button = if stem.stem.starting_keysound.is_none() {
+                                    ui.button("Auto")
+                                } else {
+                                    ui.button("Fixed")
+                                };
+
+                                if button.clicked() {
+                                    stem.stem.starting_keysound = match stem.stem.starting_keysound
+                                    {
+                                        Some(_) => None,
+                                        None => Some(1),
+                                    };
+                                }
+                                if let Some(starting_keysound) = &mut stem.stem.starting_keysound {
+                                    ui.add(
+                                        egui::DragValue::new(starting_keysound)
+                                            .speed(1.0)
+                                            .custom_formatter(|v, _range| {
+                                                format!(
+                                                    "{:0>2}",
+                                                    base62::encode(u128::from(v as u64))
+                                                )
+                                            }),
+                                    );
+                                }
+                            });
+
+                            {
+                                use crate::project::StemType;
+
+                                let button_text = match stem.stem.ty {
+                                    StemType::Note => "Note",
+                                    StemType::BGM => "BGM",
+                                };
+
+                                let button_colour = match stem.stem.ty {
+                                    StemType::Note => egui::Color32::BLUE,
+                                    StemType::BGM => egui::Color32::RED,
+                                }
+                                .lerp_to_gamma(egui::Color32::WHITE, 0.3);
+
+                                let button = egui::Button::new(button_text).fill(button_colour);
+
+                                if ui.add(button).clicked() {
+                                    stem.stem.ty = match stem.stem.ty {
+                                        StemType::Note => StemType::BGM,
+                                        StemType::BGM => StemType::Note,
+                                    }
+                                }
+                            }
+
+                            let lock_text = if stem.locked { "🔒" } else { "🔓" };
+
+                            if ui
+                                .button(lock_text)
+                                .on_hover_text(
+                                    "Prevent slices from being altered on this stem (Key: L)",
+                                )
+                                .clicked()
+                            {
+                                stem.locked = !stem.locked;
+                            }
+
+                            {
+                                let mut remove_from_group = false;
+
+                                if let Some(group) = &mut stem.stem.group {
+                                    ui.horizontal(|ui| {
+                                        let text_edit =
+                                            egui::TextEdit::singleline(group).desired_width(100.0);
+                                        ui.add(text_edit);
+
+                                        if ui.button("X").clicked() {
+                                            remove_from_group = true;
+                                        }
+                                    });
+                                } else {
+                                    if ui.button("Set Group").clicked() {
+                                        stem.stem.group = Some("Group X".into());
+                                    }
+
+                                    if ui
+                                        .add_enabled(!stem.locked, Button::new("Delete Stem ⚠️"))
+                                        .clicked()
+                                    {
+                                        stem_to_delete = Some(stem_i);
+                                    }
+                                }
+
+                                if remove_from_group {
+                                    stem.stem.group = None;
+                                }
+                            }
+
+                            ui.horizontal(|ui| {
+                                let copy_text = if self.copy_from == Some(stem_i) {
+                                    "Cancel Copy"
+                                } else if self.copy_from.is_some() {
+                                    "Paste"
+                                } else {
+                                    "Copy"
+                                };
+
+                                if ui.button(copy_text).clicked() {
+                                    if self.copy_from == Some(stem_i) {
+                                        self.copy_from = None;
+                                    } else if self.copy_from.is_some() {
+                                        self.copy_to = Some(stem_i);
+                                    } else {
+                                        self.copy_from = Some(stem_i);
+                                    }
+                                }
+                            });
+                        },
+                    );
+
+                    let group_colour_opacity = self.group_colour_opacity.clamp(0.0, 1.0);
+
+                    const BASE_BACKGROUND_COLOR: egui::Color32 = egui::Color32::from_gray(35);
+                    let background_colour = if let Some(group) = &stem.stem.group {
+                        let colour = {
+                            let mut hasher = std::hash::DefaultHasher::new();
+                            group.hash(&mut hasher);
+                            let hash = hasher.finish();
+
+                            let hue = (hash & 0xffff) as f32 / 65535.0;
+
+                            let saturation_ratio = ((hash >> 16) & 0xff) as f32 / 255.0;
+                            let value_ratio = ((hash >> 24) & 0xff) as f32 / 255.0;
+
+                            egui::ecolor::Hsva::new(
+                                hue,
+                                0.5 + saturation_ratio * 0.3,
+                                0.6 + value_ratio * 0.25,
+                                1.0,
+                            )
+                            .into()
+
+                            /* old code for rgb from hash instead
+                            let colour: u64 = hash % (256 * 256 * 256);
+
+                            let r = (colour & 0xff) as u8;
+                            let b = ((colour >> 16) & 0xff) as u8;
+
+                            // egui::Color32::from_rgba_premultiplied(r, g, b, 255)
+                            */
+                        };
+
+                        BASE_BACKGROUND_COLOR.lerp_to_gamma(colour, group_colour_opacity)
+                    } else {
+                        BASE_BACKGROUND_COLOR
+                    };
+
+                    let (rect, event) = draw_stem(
+                        ui,
+                        background_colour,
+                        stem,
+                        &self.project.timing,
+                        &self.input_state,
+                        self.display_start,
+                        end_time_point,
+                    )
+                    .unwrap();
+
+                    if let Some(col) = &stem.stem.group {}
+
+                    if stem.locked {
+                        ui.painter().rect_filled(
+                            rect,
+                            0,
+                            egui::Color32::from_rgba_premultiplied(0, 0, 0, 125),
+                        );
+                    }
+
+                    if let Some(event) = event
+                        && !(stem.locked && !matches!(event, StemEvent::Hovering))
+                    {
+                        match event {
+                            StemEvent::Hovering => {
+                                for slice in std::mem::take(&mut self.midi_file_slices) {
+                                    stem.stem.slices.insert(slice);
+                                }
+                                if self.input_state.l_pressed {
+                                    stem.locked = !stem.locked;
+                                }
+                            }
+                            StemEvent::PlayAudio(sample_clicked)
+                                if let Some(audio) = &stem.audio =>
+                            {
+                                // If there is a slice before our cursor
+                                if let Some((first_slice_index, first_slice)) =
+                                    stem.stem.slices.iter().enumerate().rfind(|(_, slice)| {
+                                        let Ok(v) = calculate_num_samples(
+                                            Default::default(),
+                                            slice.time_point,
+                                            self.project.sample_rate,
+                                            1,
+                                            &self.project.timing,
+                                        ) else {
+                                            return false;
+                                        };
+
+                                        v < sample_clicked
+                                    })
+                                    && let Some(second_slice) =
+                                        stem.stem.slices.0.get(first_slice_index + 1)
+                                {
+                                    let start = first_slice.time_point;
+                                    let end = second_slice.time_point;
+
+                                    let start_sample_index = start
+                                        .samples_from_start(
+                                            audio.sample_rate(),
+                                            &self.project.timing,
+                                        )
+                                        .unwrap_or(0);
+                                    let end_sample_index = end
+                                        .samples_from_start(
+                                            audio.sample_rate(),
+                                            &self.project.timing,
+                                        )
+                                        .unwrap_or(0);
+
+                                    // TODO: Put make this pre-trim it before fetching the channels?
+                                    if let Ok(channels) = stem
+                                        .audio
+                                        .as_ref()
+                                        .expect("NO AUDIO IN STEM?")
+                                        .channels()
+                                        .into_iter()
+                                        .map(|channel| {
+                                            channel
+                                                .get(start_sample_index..end_sample_index)
+                                                .map(|v| v.to_vec())
+                                                .ok_or("bad channel")
+                                        })
+                                        .collect::<Result<Vec<_>, _>>()
+                                    {
+                                        let playback = crate::audio_player::AudioPlayback::new(
+                                            // TODO: Make this not clone the channels completely
+                                            channels, None,
+                                        )
+                                        .expect("failed to add audio");
+
+                                        if let Some(audio_player) = &self.audio_player {
+                                            audio_player.add_audio(playback);
+                                        }
+                                    } else {
+                                        log::error!("bad channel");
+                                    }
+                                }
+                            }
+                            StemEvent::LeftClick(sample_clicked) => {
+                                // shift + left click = initiaite copy
+                                if self.input_state.shift_pressed {
+                                } else {
+                                    log::trace!("clicked at {sample_clicked} samples");
+
+                                    let Ok(time_point) = crate::audio::TimePoint::from_sample(
+                                        sample_clicked,
+                                        self.project.sample_rate.0,
+                                        &self.project.timing,
+                                    ) else {
+                                        log::error!(
+                                            "failed to get time point from sample {sample_clicked}"
+                                        );
+                                        return;
+                                    };
+
+                                    stem.stem.slices_mut().insert(crate::project::Slice {
+                                        time_point: time_point.quantised(self.slice_snapping),
+                                    });
+                                }
+                            }
+
+                            StemEvent::RightClick(sample_clicked) => {
+                                let Ok(time_point) = crate::audio::TimePoint::from_sample(
+                                    sample_clicked,
+                                    self.project.sample_rate.0,
+                                    &self.project.timing,
+                                ) else {
+                                    log::error!(
+                                        "failed to get time point from sample {sample_clicked}"
+                                    );
+                                    return;
+                                };
+
+                                const DELETE_DISTANCE: f64 = 0.075;
+
+                                stem.stem.slices.0.retain(|slice| {
+                                    (slice.time_point - time_point).to_f64().abs()
+                                        > DELETE_DISTANCE * (self.zoom_level as f64)
+                                });
+                            }
+                            StemEvent::PlayAudio(_) => (),
+                        }
+                    }
+                },
+            );
+        }
+
+        if let Some(stem_i) = stem_to_export {
+            let stem = self.project.stems.get(stem_i).expect("stem i not found");
+
+            if let Some(group) = &stem.stem.group {
+                // if in a group, find all stems in that group and export them together
+                let stems = self
+                    .project
+                    .stems
+                    .iter()
+                    .filter(|stem| stem.stem.group.as_ref().is_some_and(|g| g == group))
+                    .collect::<Vec<_>>();
+
+                if !stems.is_empty() {
+                    let stem_prefix = group;
+                    let audio = stems
+                        .iter()
+                        .filter_map(|stem| stem.audio.as_ref())
+                        .collect::<Vec<_>>();
+                    let slices =
+                        stems
+                            .iter()
+                            .fold(crate::project::Slices::default(), |mut acc, x| {
+                                acc.union(&x.stem.slices);
+                                acc
+                            });
+
+                    if let Err(e) = audio::export_stem(
+                        &export_dir,
+                        stem_prefix,
+                        &audio,
+                        &slices,
+                        &self.project.timing,
+                    ) {
+                        log::error!("bad export: {e}");
+                    }
+                }
+            } else {
+                // if not in a group, just get the details from the one stem
+
+                // TODO: Log "bad stem" if audio missing "bad stem"
+                // TODO: Log "bad audio" if audio path missing
+
+                let Some(audio) = stem.audio.as_ref() else {
+                    panic!("")
+                };
+                let slices = &stem.stem.slices;
+                let audio = &[audio];
+                let Some(stem_prefix) = stem.stem.audio_path.file_stem().and_then(|v| v.to_str())
+                else {
+                    panic!("")
+                };
+
+                if let Err(e) = audio::export_stem(
+                    &export_dir,
+                    stem_prefix,
+                    audio,
+                    &slices,
+                    &self.project.timing,
+                ) {
+                    log::error!("bad export: {e}");
+                }
+            }
+        }
+
+        if let Some(stem_i) = stem_to_delete {
+            if stem_i >= self.project.stems.len() {
+                log::error!("Failed to remove stem {stem_i}: out of range");
+            }
+
+            self.project.stems.remove(stem_i);
+        }
     }
 }
 
@@ -278,17 +908,21 @@ impl eframe::App for JonnahSlicer<'_> {
         }
 
         if let Some(copy_from) = self.copy_from.clone()
-            && let Some(copy_to) = self.copy_to {
-                if let Some(from_slices) = self.project.stems.get(copy_from)
-                .map(|live|live.stem.slices.clone()) 
-                {
-                    if let Some(to) = self.project.stems.get_mut(copy_to) {
-                        to.stem.slices.union(&from_slices);
-                    }
-                } else {
-                    log::error!("unable to copy from stem[{copy_from}]");
+            && let Some(copy_to) = self.copy_to
+        {
+            if let Some(from_slices) = self
+                .project
+                .stems
+                .get(copy_from)
+                .map(|live| live.stem.slices.clone())
+            {
+                if let Some(to) = self.project.stems.get_mut(copy_to) {
+                    to.stem.slices.union(&from_slices);
                 }
+            } else {
+                log::error!("unable to copy from stem[{copy_from}]");
             }
+        }
 
         if self.refresh_project {
             use std::cmp::Ordering::*;
@@ -335,8 +969,9 @@ impl eframe::App for JonnahSlicer<'_> {
                 egui::Modifiers::COMMAND,
                 egui::Key::S,
             ))
-        }) {
-            self.save_to_disk();
+        }) && let Err(e) = self.save_to_disk()
+        {
+            log::error!("failed to save project: {e}");
         }
 
         if self.jonnah_image.is_none() {
@@ -458,217 +1093,17 @@ impl eframe::App for JonnahSlicer<'_> {
         if self.quit_application {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
-
-        /*
-        egui::Panel::top("top_panel").show(ctx, |ui| {
-            egui::MenuBar::new().ui(ui, |ui| {
-                // NOTE: no File->Quit on web pages!
-                let is_web = cfg!(target_arch = "wasm32");
-                if !is_web {
-                    ui.menu_button("File", |ui| {
-                        if ui.button("Save").clicked() {
-                            self.save_to_disk();
-                        }
-
-                        if ui.button("Quit").clicked() {
-                            self.quit_application = true;
-                        }
-                    });
-                    ui.add_space(16.0);
-                }
-
-                egui::widgets::global_theme_preference_buttons(ui);
-            });
-        });
-        */
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            self.draw_everything(ui);
-        });
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        egui::Panel::top("top_panel").show_inside(ui, |ui|{
-            ui.horizontal_top(|ui|{
-
-                ui.menu_button("File", |ui| {
-                    if ui.button("Save").clicked() {
-                        if let Err(e) = self.save_to_disk() {
-                            log::error!("failed to save project: {e}");
-                        }
-                    }
-
-                    if ui.button("Quit").clicked() {
-                        self.quit_application = true;
-                    }
-                });
-
-                ui.menu_button("Analyse", |ui| {
-                    ui.menu_button("Calculate Initial Starting Keysounds", |ui|{
-                        let wiggles = [0u64, 5, 10, 50];
-
-                        for wiggle in wiggles {
-                            if ui.button(format!("Wiggle room: {wiggle}")) .on_hover_text("Calculate the starting keysound for each stem, leaving small gaps between each one for wiggle room.\n\nThis will permanently alter your project, and should only be used ONCE to get initial keysound values for your stems.")
-                                .clicked() {
-                                let mut_stems = self.project.stems.iter_mut().map(|live| &mut live.stem).collect::<Vec<_>>();
-                                if let Err(e) = crate::project::calculate_initial_keysounds(mut_stems, wiggle) {
-                                    log::error!("failed to calculate initial keysounds: {e}");
-                                }
-                                else {
-                                    log::info!("Successfully calculated initial keysounds. Remember to save your project!");
-                                }
-                            }
-                        }
-                    })
-                });
-
-                ui.add_space(16.0);
-                egui::widgets::global_theme_preference_buttons(ui);
-            });
-        });
-
-        ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
-            ui.label("Snapping: ");
-            const SNAPPINGS: [u16; 12] = [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 64, 128];
-
-            for snap_v in SNAPPINGS {
-                let button = ui.button(format!("1/{snap_v}"));
-
-                if self.slice_snapping.as_measure_denom() == snap_v {
-                    button.highlight();
-                } else {
-                    if let Some(num) = self.input_state.number_pressed {
-                        //    [1, 2, 3, ..., 9, 0]
-                        // => [0, 1, 2, 3, ..., 8, 9]
-                        let num = (num + 9) % 10;
-
-                        self.slice_snapping =
-                            crate::audio::Snapping::Measure(SNAPPINGS[num as usize]);
-                    } else if button.clicked() {
-                        self.slice_snapping = crate::audio::Snapping::Measure(snap_v);
-                    }
-                }
-            }
-        });
+        self.draw_top_bar(ui);
 
         egui::CentralPanel::default().show_inside(ui, |ui| {
             if let Some(jonnah) = &self.jonnah_image {
                 jonnah.paint_at(ui, ui.content_rect());
             }
 
-            ui.vertical(|ui| {
-                ui.horizontal(|ui|{
-                    ui.heading(format!("JonnahSlicer v{}", env!("CARGO_PKG_VERSION")));
-
-                    let mut diagnostic = self.previous_diagnostic.lock().unwrap();
-
-                    if diagnostic.as_ref().is_some_and(|(time, _)| {
-                         std::time::SystemTime::now().duration_since(*time).unwrap_or(std::time::Duration::from_secs(10))
-                             >= std::time::Duration::from_secs(10) 
-                    }) {
-                        *diagnostic = None;
-                    } 
-
-                    diagnostic.as_ref().inspect(|(_, msg)|{
-                        ui.label(msg);
-                    });
-                });
-
-                ui.horizontal(|ui| {
-                    if ui.button("⟳").on_hover_text("Refresh the project, ordering stems by group (Key: F5)").clicked() || self.input_state.f5_pressed {
-                        self.refresh_project = true;
-                    }
-
-                    // The central panel the region left after adding TopPanel's and SidePanel's
-                    ui.add(egui::Slider::new(&mut self.zoom_level, 0.0..=8.0).text("Zoom"));
-                    if ui
-                        .add(
-                            egui::Slider::new(
-                                &mut self.project.sample_rate,
-                                crate::project::SampleRate::MIN..=crate::project::SampleRate::MAX,
-                            )
-                            .text("Sample Rate"),
-                        )
-                        .changed()
-                    {
-                        let new_audio_player =
-                            match crate::audio_player::AudioPlayer::new(self.project.sample_rate) {
-                                Ok(audio_player) => {
-                                    log::info!(
-                                        "updated audio player sample rate to {}",
-                                        self.project.sample_rate.0
-                                    );
-                                    Some(audio_player)
-                                }
-                                Err(e) => {
-                                    log::error!(
-                                        "failed to set audio player sample rate to {}: {e}",
-                                        self.project.sample_rate.0
-                                    );
-                                    None
-                                }
-                            };
-
-                        self.audio_player =
-                            new_audio_player.inspect(|player| player.set_volume(self.audio_volume));
-                    }
-
-                    ui.add_space(100.0);
-
-                    ui.add(egui::Slider::new(&mut self.group_colour_opacity, 0.0..=1.0).max_decimals(2).text("Group Opacity"));
-
-                    if let Some(audio_player) = &mut self.audio_player {
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut self.audio_volume, 0.0..=1.0).text("Volume"),
-                            )
-                            .changed()
-                        {
-                            audio_player.set_volume(self.audio_volume);
-                        }
-                    } else {
-                        ui.colored_label(egui::Color32::RED, "audio player not initialised");
-                    }
-
-                    if ui.button("Export All Stems").clicked() {
-                        let mut exported = None;
-
-                        for stem in self.project.stems.iter().filter(|stem| !stem.stem.slices.0.is_empty()) {
-                            let wrap_export_stem = || { 
-                                let audio = stem.audio.as_ref().ok_or("no stem")?;
-                                let stem_prefix = stem.stem.audio_path.file_stem()
-                                    .and_then(|v| v.to_str())
-                                    .ok_or("bad stem prefix")?;
-
-                                let slices = &stem.stem.slices;
-                                audio::export_stem(self.default_export_dir(),stem_prefix, &[audio], slices, &self.project.timing)
-                            };
-
-                            if let Err(e) = wrap_export_stem() {
-                                log::error!("failed to export all stems: {e}");
-                                exported = None;
-                                break;
-                            }
-
-                            *exported.get_or_insert(0usize) += 1;
-                        }
-
-                        if let Some(exported) = exported {
-                            log::info!("exported {exported} stems");
-                        }
-                    }
-
-                    if ui.button("Generate BMS File").clicked() {
-                        if let Err(e) = export_bms_file(self.default_export_dir().join("out.bms"), &self.project.as_project()) {
-                            log::error!("failed to export BMS file: {e}");
-                        }
-                    }
-                });
-            });
-
             ui.separator();
-
-            let display_length = num_rational::Ratio::new(8 * (256.0 * self.zoom_level).round() as i64, 256);
 
             egui::ScrollArea::vertical()
                 .scroll_source(if self.input_state.shift_pressed {
@@ -676,397 +1111,7 @@ impl eframe::App for JonnahSlicer<'_> {
                 } else {
                     egui::scroll_area::ScrollSource::MOUSE_WHEEL
                 })
-                .show(ui, |ui| {
-                    let end_time_point =
-                        self.display_start + display_length.trunc();
-
-                    // Draw measures labels
-                    {
-                        let (rect, _response) = ui.allocate_exact_size(
-                            egui::Vec2::new(ui.available_width(), 20.0),
-                            egui::Sense::click(),
-                        );
-
-                        let start = self.display_start.to_f64();
-                        let end = self.display_start.to_integer() as f64 + display_length.to_f64();
-
-                        let mut i = self.display_start.ceil().to_f64();
-                        while i < end {
-                            let tx = (i - start) / (end - start);
-                            let pos = egui::pos2(rect.min.x + tx as f32 * rect.width(), rect.min.y);
-
-                            ui.put(
-                                egui::Rect::from_pos(pos).expand(20.0),
-                                egui::Label::new(i.to_string()),
-                            );
-
-                            i += 1.0;
-                        }
-                    }
-
-                    let export_dir = self.default_export_dir();
-
-                    let mut stem_to_export = None;
-                    let mut stem_to_delete = None;
-
-                    for (stem_i, stem) in  self.project.stems.iter_mut().enumerate() {
-                        let full_stem_dims = [ui.available_width(), STEM_HEIGHT];
-
-                        ui.allocate_ui_with_layout(
-                        full_stem_dims.into(),
-                        egui::Layout::left_to_right(egui::Align::Max),
-                        |ui| {
-                            ui.allocate_ui_with_layout(
-                                [(ui.available_width() * 0.4).min(200.0), STEM_HEIGHT].into(),
-                                egui::Layout::top_down_justified(egui::Align::Center),
-                                |ui| {
-                                    if ui.button("Export").clicked() {
-                                        stem_to_export = Some(stem_i);
-                                    }
-
-                                    ui.horizontal(|ui| {
-                                        ui.label("Start: ");
-
-                                        let button = if stem.stem.starting_keysound.is_none() {
-                                            ui.button("Auto")
-                                        } else {
-                                            ui.button("Fixed")
-                                        };
-
-                                        if button.clicked() {
-                                            stem.stem.starting_keysound =
-                                                match stem.stem.starting_keysound {
-                                                    Some(_) => None,
-                                                    None => Some(1),
-                                                };
-                                        }
-                                        if let Some(starting_keysound) =
-                                            &mut stem.stem.starting_keysound
-                                        {
-                                            ui.add(
-                                                egui::DragValue::new(starting_keysound)
-                                                    .speed(1.0)
-                                                    .custom_formatter(|v, _range| {
-                                                        format!(
-                                                            "{:0>2}",
-                                                            base62::encode(u128::from(v as u64))
-                                                        )
-                                                    }),
-                                            );
-                                        }
-                                    });
-
-
-                                    {
-                                        use crate::project::StemType;
-
-                                    let button_text = match stem.stem.ty {
-                                        StemType::Note => "Note",
-                                        StemType::BGM => "BGM"
-                                    };
-
-                                    let button_colour = match stem.stem.ty {
-                                        StemType::Note => egui::Color32::BLUE,
-                                        StemType::BGM => egui::Color32::RED
-                                    }
-                                    .lerp_to_gamma(egui::Color32::WHITE, 0.3);
-
-                                    let button = egui::Button::new(button_text).fill(button_colour);
-
-                                    if ui.add(button).clicked() {
-                                        stem.stem.ty = match stem.stem.ty {
-                                            StemType::Note => StemType::BGM,
-                                            StemType::BGM => StemType::Note
-                                        }
-                                    }
-                                    }
-
-                                    let lock_text = if stem.locked {
-                                        "🔒"
-                                    } else {
-                                        "🔓"
-                                    };
-
-                                    if ui.button(lock_text).on_hover_text("Prevent slices from being altered on this stem (Key: L)").clicked() {
-                                        stem.locked = !stem.locked;
-                                    }
-
-                                    {
-                                        let mut remove_from_group = false;
-
-                                        if let Some(group) = &mut stem.stem.group { 
-                                            ui.horizontal(|ui|{ 
-                                                let text_edit = egui::TextEdit::singleline(group).desired_width(100.0);
-                                                ui.add(text_edit);
-
-                                                if ui.button("X").clicked() {
-                                                    remove_from_group = true;
-                                                }
-                                            });
-                                        }
-                                        else {
-                                            if ui.button("Set Group").clicked() {
-                                                stem.stem.group = Some("Group X".into()); 
-                                            }
-
-                                            if ui.add_enabled(!stem.locked, Button::new("Delete Stem ⚠️")).clicked() {
-                                                stem_to_delete = Some(stem_i);
-                                            }
-                                        } 
-
-                                        if remove_from_group {
-                                            stem.stem.group = None;
-                                        }
-                                    }
-
-                                    ui.horizontal(|ui| {
-                                        let copy_text = if self.copy_from == Some(stem_i) {
-                                            "Cancel Copy"
-                                        } else if self.copy_from.is_some() {
-                                            "Paste"
-                                        } else {
-                                            "Copy"
-                                        };
-
-                                        if ui.button(copy_text).clicked() {
-                                            if self.copy_from == Some(stem_i) {
-                                                self.copy_from = None;
-                                            } else if self.copy_from.is_some() {
-                                                self.copy_to = Some(stem_i);
-                                            } else {
-                                                self.copy_from = Some(stem_i);
-                                            }
-                                        }
-                                    });
-                                },
-                            );
-
-
-                            let group_colour_opacity = self.group_colour_opacity.clamp(0.0, 1.0);
-
-                            const BASE_BACKGROUND_COLOR: egui::Color32 = egui::Color32::from_gray(35);
-                            let background_colour = if let Some(group) = &stem.stem.group {
-                                let colour = {
-                                    let mut hasher = std::hash::DefaultHasher::new();
-                                    group.hash(&mut hasher);
-                                    let hash = hasher.finish();
-
-                                    let hue = (hash & 0xffff) as f32 / 65535.0;
-
-                                    let saturation_ratio = ((hash >> 16) & 0xff) as f32 / 255.0;
-                                    let value_ratio = ((hash >> 24) & 0xff) as f32 / 255.0;
-
-                                    egui::ecolor::Hsva::new(
-                                        hue, 
-                                        0.5 + saturation_ratio * 0.3,
-                                        0.6 + value_ratio * 0.25,
-                                        1.0
-                                        ).into()
-
-                                    /* old code for rgb from hash instead
-                                    let colour: u64 = hash % (256 * 256 * 256);
-
-                                    let r = (colour & 0xff) as u8;
-                                    let b = ((colour >> 16) & 0xff) as u8;
-
-                                    // egui::Color32::from_rgba_premultiplied(r, g, b, 255)
-                                    */
-
-                                };
-
-                                BASE_BACKGROUND_COLOR.lerp_to_gamma(colour, group_colour_opacity)
-                            } else {
-                                BASE_BACKGROUND_COLOR
-                            };
-
-
-                            let (rect, event) = draw_stem(
-                                ui,
-                                background_colour,
-                                stem,
-                                &self.project.timing,
-                                &self.input_state,
-                                self.display_start,
-                                end_time_point,
-                            )
-                            .unwrap();
-
-                            if let Some(col) = &stem.stem.group{
-                            }
-
-                            if stem.locked{ 
-                                ui.painter().rect_filled(rect, 0, egui::Color32::from_rgba_premultiplied(0, 0, 0, 125));
-                            }
-
-                            if let Some(event) = event && 
-                                // we need hover to make locking/re-locking work
-                                !(stem.locked && !matches!(event, StemEvent::Hovering)) { 
-                                    match event {
-                                        StemEvent::Hovering => {
-                                            for slice in std::mem::take(&mut self.midi_file_slices) {
-                                                stem.stem.slices.insert(slice);
-                                            }
-                                            if self.input_state.l_pressed {
-                                                stem.locked = !stem.locked;
-                                            }
-                                        }
-                                        StemEvent::PlayAudio(sample_clicked)
-                                            if let Some(audio) = &stem.audio =>
-                                        {
-                                            // If there is a slice before our cursor
-                                            if let Some((first_slice_index, first_slice)) =
-                                                stem.stem.slices.iter().enumerate().rfind(|(_, slice)| {
-                                                    let Ok(v) = calculate_num_samples(
-                                                        Default::default(),
-                                                        slice.time_point,
-                                                        self.project.sample_rate,
-                                                        1,
-                                                        &self.project.timing,
-                                                    ) else {
-                                                        return false;
-                                                    };
-
-                                                    v < sample_clicked
-                                                })
-                                                && let Some(second_slice) =
-                                                    stem.stem.slices.0.get(first_slice_index + 1)
-                                            {
-                                                let start = first_slice.time_point;
-                                                let end = second_slice.time_point;
-
-                                                let start_sample_index = start
-                                                    .samples_from_start(
-                                                        audio.sample_rate(),
-                                                        &self.project.timing,
-                                                    )
-                                                    .unwrap_or(0);
-                                                let end_sample_index = end
-                                                    .samples_from_start(
-                                                        audio.sample_rate(),
-                                                        &self.project.timing,
-                                                    )
-                                                    .unwrap_or(0);
-
-                                                // TODO: Put make this pre-trim it before fetching the channels?
-                                                if let Ok(channels) = stem
-                                                    .audio
-                                                    .as_ref()
-                                                    .expect("NO AUDIO IN STEM?")
-                                                    .channels()
-                                                    .into_iter()
-                                                    .map(|channel| {
-                                                        channel
-                                                            .get(start_sample_index..end_sample_index)
-                                                            .map(|v| v.to_vec())
-                                                            .ok_or("bad channel")
-                                                    })
-                                                    .collect::<Result<Vec<_>, _>>()
-                                                {
-                                                    let playback = crate::audio_player::AudioPlayback::new(
-                                                        // TODO: Make this not clone the channels completely
-                                                        channels, None,
-                                                    )
-                                                    .expect("failed to add audio");
-
-                                                    if let Some(audio_player) = &self.audio_player {
-                                                        audio_player.add_audio(playback);
-                                                    }
-                                                } else {
-                                                    log::error!("bad channel");
-                                                }
-                                            }
-                                        }
-                                        StemEvent::LeftClick(sample_clicked) => {
-                                            log::trace!("clicked at {sample_clicked} samples");
-
-                                            let Ok(time_point) = crate::audio::TimePoint::from_sample(
-                                                sample_clicked,
-                                                self.project.sample_rate.0,
-                                                &self.project.timing,
-                                            ) else {
-                                                log::error!(
-                                                    "failed to get time point from sample {sample_clicked}"
-                                                );
-                                                return;
-                                            };
-
-                                            stem.stem.slices_mut().insert(crate::project::Slice {
-                                                time_point: time_point.quantised(self.slice_snapping),
-                                            });
-                                        }
-
-                                        StemEvent::RightClick(sample_clicked) => {
-                                            let Ok(time_point) = crate::audio::TimePoint::from_sample(
-                                                sample_clicked,
-                                                self.project.sample_rate.0,
-                                                &self.project.timing,
-                                            ) else {
-                                                log::error!(
-                                                    "failed to get time point from sample {sample_clicked}"
-                                                );
-                                                return;
-                                            };
-
-                                            const DELETE_DISTANCE: f64 = 0.075;
-
-                                            stem.stem.slices.0.retain(|slice| {
-                                                (slice.time_point - time_point).to_f64().abs()
-                                                    > DELETE_DISTANCE * (self.zoom_level as f64)
-                                            });
-                                        }
-                                        StemEvent::PlayAudio(_) => ()
-                                    }
-                            }
-                        },
-                    );
-                    }
-
- 
-                    if let Some(stem_i) = stem_to_export {
-                        let stem = self.project.stems.get(stem_i).expect("stem i not found");
-
-                        if let Some(group) = &stem.stem.group {
-                            // if in a group, find all stems in that group and export them together
-                            let stems = self.project.stems.iter()
-                                .filter(|stem| stem.stem.group.as_ref().is_some_and(|g| g == group)).collect::<Vec<_>>();
-
-                            if !stems.is_empty() {
-                                let stem_prefix = group;
-                                let audio = stems.iter().filter_map(|stem|stem.audio.as_ref()).collect::<Vec<_>>();
-                                let slices = stems.iter().fold(crate::project::Slices::default(), |mut acc, x|{
-                                    acc.union(&x.stem.slices);
-                                    acc
-                                });
-
-                                if let Err(e) = audio::export_stem(&export_dir, stem_prefix, &audio, &slices, &self.project.timing) {
-                                    log::error!("bad export: {e}");
-                                }
-                            }
-                        } else {
-                            // if not in a group, just get the details from the one stem
-                            
-                            // TODO: Log "bad stem" if audio missing "bad stem"
-                            // TODO: Log "bad audio" if audio path missing
-                            
-                            let Some(audio) = stem.audio.as_ref() else {panic!("")};
-                            let slices = &stem.stem.slices;
-                            let audio = &[audio];
-                            let Some(stem_prefix) = stem.stem.audio_path.file_stem().and_then(|v|v.to_str()) else {panic!("")};
-
-                            if let Err(e) = audio::export_stem(&export_dir, stem_prefix, audio, &slices, &self.project.timing) {
-                                log::error!("bad export: {e}");
-                            }
-                        }
-                    }
-
-                    if let Some(stem_i) = stem_to_delete {
-                        if stem_i >= self.project.stems.len() {
-                            log::error!("Failed to remove stem {stem_i}: out of range");
-                        }
-
-                        self.project.stems.remove(stem_i);
-                    }
-                });
+                .show(ui, |ui| self.draw_main_ui(ui));
 
             let rect = ui.available_rect_before_wrap();
 
