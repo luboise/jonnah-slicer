@@ -124,6 +124,9 @@ pub struct JonnahSlicer<'a> {
     drag_and_drop: egui::DragAndDrop,
     #[serde(skip)]
     audio_player: Option<crate::audio_player::AudioPlayer>,
+
+    #[serde(skip)]
+    stem_events: Vec<(usize, StemEvent)>,
 }
 
 #[derive(Debug)]
@@ -266,6 +269,7 @@ impl Default for JonnahSlicer<'_> {
             copy_from: None,
             copy_to: None,
             selection: Selection::default(),
+            stem_events: vec![],
         }
     }
 }
@@ -710,15 +714,6 @@ impl JonnahSlicer<'_> {
                                 1.0,
                             )
                             .into()
-
-                            /* old code for rgb from hash instead
-                            let colour: u64 = hash % (256 * 256 * 256);
-
-                            let r = (colour & 0xff) as u8;
-                            let b = ((colour >> 16) & 0xff) as u8;
-
-                            // egui::Color32::from_rgba_premultiplied(r, g, b, 255)
-                            */
                         };
 
                         BASE_BACKGROUND_COLOR.lerp_to_gamma(colour, group_colour_opacity)
@@ -750,157 +745,7 @@ impl JonnahSlicer<'_> {
                     if let Some(event) = event
                         && !(stem.locked && !matches!(event, StemEvent::Hovering(_)))
                     {
-                        match event {
-                            StemEvent::Hovering(sample_clicked) => {
-                                for slice in std::mem::take(&mut self.midi_file_slices) {
-                                    stem.stem.slices.insert(slice);
-                                }
-                                if self.input_state.l_pressed {
-                                    stem.locked = !stem.locked;
-                                }
-
-                                let Ok(click_point) = crate::audio::TimePoint::from_sample(
-                                    sample_clicked,
-                                    self.project.sample_rate.0,
-                                    &self.project.timing,
-                                ) else {
-                                    log::error!(
-                                        "failed to get time point from sample {sample_clicked}"
-                                    );
-                                    return;
-                                };
-
-                                let quantised = click_point.quantised(self.slice_snapping);
-
-                                if self.input_state.paste_pressed {
-                                    if let Some((index, range)) = self.selection.get_selection() {
-                                        let (from, to) = (range.start, range.end);
-
-                                        let slices = self
-                                            .project
-                                            .stems
-                                            .get(index)
-                                            .unwrap()
-                                            .stem
-                                            .slices
-                                            .clone();
-
-                                        log::info!("pasting!");
-                                    }
-                                } else if self.input_state.space_pressed {
-                                    self.selection.select(stem_i, quantised);
-                                }
-                            }
-                            StemEvent::PlayAudio(sample_clicked)
-                                if let Some(audio) = &stem.audio =>
-                            {
-                                // If there is a slice before our cursor
-                                if let Some((first_slice_index, first_slice)) =
-                                    stem.stem.slices.iter().enumerate().rfind(|(_, slice)| {
-                                        let Ok(v) = calculate_num_samples(
-                                            Default::default(),
-                                            slice.time_point,
-                                            self.project.sample_rate,
-                                            1,
-                                            &self.project.timing,
-                                        ) else {
-                                            return false;
-                                        };
-
-                                        v < sample_clicked
-                                    })
-                                    && let Some(second_slice) =
-                                        stem.stem.slices.0.get(first_slice_index + 1)
-                                {
-                                    let start = first_slice.time_point;
-                                    let end = second_slice.time_point;
-
-                                    let start_sample_index = start
-                                        .samples_from_start(
-                                            audio.sample_rate(),
-                                            &self.project.timing,
-                                        )
-                                        .unwrap_or(0);
-                                    let end_sample_index = end
-                                        .samples_from_start(
-                                            audio.sample_rate(),
-                                            &self.project.timing,
-                                        )
-                                        .unwrap_or(0);
-
-                                    // TODO: Put make this pre-trim it before fetching the channels?
-                                    if let Ok(channels) = stem
-                                        .audio
-                                        .as_ref()
-                                        .expect("NO AUDIO IN STEM?")
-                                        .channels()
-                                        .into_iter()
-                                        .map(|channel| {
-                                            channel
-                                                .get(start_sample_index..end_sample_index)
-                                                .map(|v| v.to_vec())
-                                                .ok_or("bad channel")
-                                        })
-                                        .collect::<Result<Vec<_>, _>>()
-                                    {
-                                        let playback = crate::audio_player::AudioPlayback::new(
-                                            // TODO: Make this not clone the channels completely
-                                            channels, None,
-                                        )
-                                        .expect("failed to add audio");
-
-                                        if let Some(audio_player) = &self.audio_player {
-                                            audio_player.add_audio(playback);
-                                        }
-                                    } else {
-                                        log::error!("bad channel");
-                                    }
-                                }
-                            }
-                            StemEvent::LeftClick(sample_clicked) => {
-                                let Ok(click_point) = crate::audio::TimePoint::from_sample(
-                                    sample_clicked,
-                                    self.project.sample_rate.0,
-                                    &self.project.timing,
-                                ) else {
-                                    log::error!(
-                                        "failed to get time point from sample {sample_clicked}"
-                                    );
-                                    return;
-                                };
-
-                                // shift + left click = initiate copy
-                                if !self.input_state.shift_pressed {
-                                    log::trace!("clicked at {sample_clicked} samples");
-
-                                    let time_point = click_point.quantised(self.slice_snapping);
-                                    stem.stem
-                                        .slices_mut()
-                                        .insert(crate::project::Slice { time_point });
-                                }
-                            }
-
-                            StemEvent::RightClick(sample_clicked) => {
-                                let Ok(time_point) = crate::audio::TimePoint::from_sample(
-                                    sample_clicked,
-                                    self.project.sample_rate.0,
-                                    &self.project.timing,
-                                ) else {
-                                    log::error!(
-                                        "failed to get time point from sample {sample_clicked}"
-                                    );
-                                    return;
-                                };
-
-                                const DELETE_DISTANCE: f64 = 0.075;
-
-                                stem.stem.slices.0.retain(|slice| {
-                                    (slice.time_point - time_point).to_f64().abs()
-                                        > DELETE_DISTANCE * (self.zoom_level as f64)
-                                });
-                            }
-                            StemEvent::PlayAudio(_) => (),
-                        }
+                        self.stem_events.push((stem_i, event));
                     }
                 },
             );
@@ -978,6 +823,144 @@ impl JonnahSlicer<'_> {
             self.project.stems.remove(stem_i);
         }
     }
+
+    fn handle_stem_events(&mut self) {
+        for (stem_i, event) in std::mem::take(&mut self.stem_events) {
+            let Some(stem) = self.project.stems.get_mut(stem_i) else {
+                continue;
+            };
+
+            match event {
+                StemEvent::Hovering(sample_clicked) => {
+                    for slice in std::mem::take(&mut self.midi_file_slices) {
+                        stem.stem.slices.insert(slice);
+                    }
+                    if self.input_state.l_pressed {
+                        stem.locked = !stem.locked;
+                    }
+
+                    let Ok(click_point) = crate::audio::TimePoint::from_sample(
+                        sample_clicked,
+                        self.project.sample_rate.0,
+                        &self.project.timing,
+                    ) else {
+                        log::error!("failed to get time point from sample {sample_clicked}");
+                        return;
+                    };
+
+                    let quantised = click_point.quantised(self.slice_snapping);
+
+                    if self.input_state.paste_pressed {
+                        if let Some((index, range)) = self.selection.get_selection() {
+                            let (from, to) = (range.start, range.end);
+
+                            let slices = self.project.stems.get(index).unwrap().stem.slices.clone();
+
+                            log::info!("pasting!");
+                        }
+                    } else if self.input_state.space_pressed {
+                        self.selection.select(stem_i, quantised);
+                    }
+                }
+                StemEvent::PlayAudio(sample_clicked) if let Some(audio) = &stem.audio => {
+                    // If there is a slice before our cursor
+                    if let Some((first_slice_index, first_slice)) =
+                        stem.stem.slices.iter().enumerate().rfind(|(_, slice)| {
+                            let Ok(v) = calculate_num_samples(
+                                Default::default(),
+                                slice.time_point,
+                                self.project.sample_rate,
+                                1,
+                                &self.project.timing,
+                            ) else {
+                                return false;
+                            };
+
+                            v < sample_clicked
+                        })
+                        && let Some(second_slice) = stem.stem.slices.0.get(first_slice_index + 1)
+                    {
+                        let start = first_slice.time_point;
+                        let end = second_slice.time_point;
+
+                        let start_sample_index = start
+                            .samples_from_start(audio.sample_rate(), &self.project.timing)
+                            .unwrap_or(0);
+                        let end_sample_index = end
+                            .samples_from_start(audio.sample_rate(), &self.project.timing)
+                            .unwrap_or(0);
+
+                        // TODO: Put make this pre-trim it before fetching the channels?
+                        if let Ok(channels) = stem
+                            .audio
+                            .as_ref()
+                            .expect("NO AUDIO IN STEM?")
+                            .channels()
+                            .into_iter()
+                            .map(|channel| {
+                                channel
+                                    .get(start_sample_index..end_sample_index)
+                                    .map(|v| v.to_vec())
+                                    .ok_or("bad channel")
+                            })
+                            .collect::<Result<Vec<_>, _>>()
+                        {
+                            let playback = crate::audio_player::AudioPlayback::new(
+                                // TODO: Make this not clone the channels completely
+                                channels, None,
+                            )
+                            .expect("failed to add audio");
+
+                            if let Some(audio_player) = &self.audio_player {
+                                audio_player.add_audio(playback);
+                            }
+                        } else {
+                            log::error!("bad channel");
+                        }
+                    }
+                }
+                StemEvent::LeftClick(sample_clicked) => {
+                    let Ok(click_point) = crate::audio::TimePoint::from_sample(
+                        sample_clicked,
+                        self.project.sample_rate.0,
+                        &self.project.timing,
+                    ) else {
+                        log::error!("failed to get time point from sample {sample_clicked}");
+                        return;
+                    };
+
+                    // shift + left click = initiate copy
+                    if !self.input_state.shift_pressed {
+                        log::trace!("clicked at {sample_clicked} samples");
+
+                        let time_point = click_point.quantised(self.slice_snapping);
+                        stem.stem
+                            .slices_mut()
+                            .insert(crate::project::Slice { time_point });
+                    }
+                }
+
+                StemEvent::RightClick(sample_clicked) => {
+                    let Ok(time_point) = crate::audio::TimePoint::from_sample(
+                        sample_clicked,
+                        self.project.sample_rate.0,
+                        &self.project.timing,
+                    ) else {
+                        log::error!("failed to get time point from sample {sample_clicked}");
+                        return;
+                    };
+
+                    const DELETE_DISTANCE: f64 = 0.075;
+
+                    stem.stem.slices.0.retain(|slice| {
+                        (slice.time_point - time_point).to_f64().abs()
+                            > DELETE_DISTANCE * (self.zoom_level as f64)
+                    });
+                }
+                StemEvent::PlayAudio(_) => (),
+            }
+        }
+    }
 }
 
 impl eframe::App for JonnahSlicer<'_> {
@@ -988,12 +971,14 @@ impl eframe::App for JonnahSlicer<'_> {
 
     /// Called each time the UI needs repainting, which may be many times per second.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.handle_stem_events();
+
         if self.input_state.esc_pressed {
             self.copy_from = None;
             self.copy_to = None;
         }
 
-        if let Some(copy_from) = self.copy_from.clone()
+        if let Some(copy_from) = self.copy_from
             && let Some(copy_to) = self.copy_to
         {
             if let Some(from_slices) = self
@@ -1011,7 +996,7 @@ impl eframe::App for JonnahSlicer<'_> {
         }
 
         if self.refresh_project {
-            use std::cmp::Ordering::*;
+            use std::cmp::Ordering::{Greater, Less};
 
             self.refresh_project = false;
 
@@ -1235,6 +1220,23 @@ enum StemEvent {
     PlayAudio(usize),
 }
 
+fn draw_line(painter: &egui::Painter, stroke: egui::Stroke, rect: egui::Rect, t: f32) {
+    let tx = rect.min.x + t * (rect.max.x - rect.min.x);
+
+    let points = [
+        egui::Pos2 {
+            x: tx,
+            y: rect.min.y,
+        },
+        egui::Pos2 {
+            x: tx,
+            y: rect.max.y,
+        },
+    ];
+
+    painter.line_segment(points, stroke);
+}
+
 fn draw_stem(
     ui: &mut egui::Ui,
     background_color: egui::Color32,
@@ -1259,7 +1261,7 @@ fn draw_stem(
         .map(|v| v.sample_rate().into())
         .unwrap_or_default();
 
-    let start_sample = calculate_num_samples(
+    let start = calculate_num_samples(
         crate::audio::TimePoint::default(),
         start_time,
         sample_rate,
@@ -1267,7 +1269,7 @@ fn draw_stem(
         timing,
     )?;
 
-    let end_sample = calculate_num_samples(
+    let end = calculate_num_samples(
         crate::audio::TimePoint::default(),
         end_time,
         sample_rate,
@@ -1275,7 +1277,7 @@ fn draw_stem(
         timing,
     )?;
 
-    let visual_samples = end_sample - start_sample;
+    let width_samples = end - start;
 
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, background_color);
@@ -1291,7 +1293,7 @@ fn draw_stem(
     };
 
     if let Some(audio) = &live_stem.audio {
-        let num_samples = end_sample - start_sample;
+        let num_samples = end - start;
         let starting_sample = start_time.samples_from_start(audio.sample_rate(), timing)?;
 
         // TODO: Move this somewhere else?
@@ -1324,7 +1326,6 @@ fn draw_stem(
             Some((slice_i, slice.clone()))
         });
 
-    let measure_stroke = egui::Stroke::new(2.0f32, egui::Color32::DARK_BLUE.linear_multiply(0.7));
     for i in start_time.to_integer()..end_time.to_integer() {
         let measure_sample_index = calculate_num_samples(
             Default::default(),
@@ -1334,29 +1335,16 @@ fn draw_stem(
             timing,
         )?;
 
-        if measure_sample_index < start_sample || end_sample < measure_sample_index {
+        if measure_sample_index < start || end < measure_sample_index {
             continue;
         }
 
-        let ratio = (measure_sample_index - start_sample) as f64 / (visual_samples) as f64;
+        let ratio = (measure_sample_index - start) as f32 / (width_samples) as f32;
 
-        let tx = rect.min.x + (ratio as f32) * (rect.max.x - rect.min.x);
-
-        let points = [
-            egui::Pos2 {
-                x: tx,
-                y: rect.min.y,
-            },
-            egui::Pos2 {
-                x: tx,
-                y: rect.max.y,
-            },
-        ];
-
-        painter.line_segment(points, measure_stroke);
+        let stroke = egui::Stroke::new(2.0f32, egui::Color32::DARK_BLUE.linear_multiply(0.7));
+        draw_line(&painter, stroke, rect, ratio);
     }
 
-    let bpm_change_stroke = egui::Stroke::new(6.0f32, egui::Color32::RED.linear_multiply(0.7));
     for bpm_change in bpm_changes {
         let sample = calculate_num_samples(
             Default::default(),
@@ -1366,25 +1354,14 @@ fn draw_stem(
             timing,
         )?;
 
-        if sample < start_sample || end_sample < sample {
+        if sample < start || end < sample {
             continue;
         }
 
-        let ratio = (sample - start_sample) as f64 / (visual_samples) as f64;
-        let tx = rect.min.x + (ratio as f32) * (rect.max.x - rect.min.x);
+        let ratio = (sample - start) as f32 / (width_samples) as f32;
 
-        let points = [
-            egui::Pos2 {
-                x: tx,
-                y: rect.min.y,
-            },
-            egui::Pos2 {
-                x: tx,
-                y: rect.max.y,
-            },
-        ];
-
-        painter.line_segment(points, bpm_change_stroke);
+        let stroke = egui::Stroke::new(6.0f32, egui::Color32::RED.linear_multiply(0.7));
+        draw_line(&painter, stroke, rect, ratio);
     }
 
     for (i, slice) in slices {
@@ -1396,26 +1373,15 @@ fn draw_stem(
             timing,
         )?;
 
-        if sample < start_sample || end_sample < sample {
+        if sample < start || end < sample {
             break;
         }
 
-        let ratio = (sample - start_sample) as f64 / (visual_samples) as f64;
+        let ratio = (sample - start) as f32 / (width_samples) as f32;
 
-        let tx = rect.min.x + (ratio as f32) * (rect.max.x - rect.min.x);
+        draw_line(&painter, stroke, rect, ratio);
 
-        let points = [
-            egui::Pos2 {
-                x: tx,
-                y: rect.min.y,
-            },
-            egui::Pos2 {
-                x: tx,
-                y: rect.max.y,
-            },
-        ];
-
-        painter.line_segment(points, stroke);
+        let tx = rect.min.x + ratio * (rect.max.x - rect.min.x);
         painter.text(
             [tx, rect.max.y].into(),
             egui::Align2::LEFT_BOTTOM,
@@ -1434,15 +1400,14 @@ fn draw_stem(
         && rect.contains(*mouse_pos)
     {
         let sample_clicked =
-            (start_sample as f64 + mouse_x_ratio as f64 * visual_samples as f64).round() as usize;
+            (start as f64 + mouse_x_ratio as f64 * width_samples as f64).round() as usize;
 
         // default to hovering if no other event is met
         event = Some(StemEvent::Hovering(sample_clicked));
 
         if response.middle_clicked() || input_state.g_pressed {
-            let sample_clicked = (start_sample as f64
-                + mouse_x_ratio as f64 * visual_samples as f64)
-                .round() as usize;
+            let sample_clicked =
+                (start as f64 + mouse_x_ratio as f64 * width_samples as f64).round() as usize;
 
             event = Some(StemEvent::PlayAudio(sample_clicked));
         }

@@ -185,11 +185,7 @@ impl RatioExt for TimePoint {
     }
 
     fn abs(&self) -> Self {
-        if Self::ZERO < *self {
-            -self.clone()
-        } else {
-            self.clone()
-        }
+        if Self::ZERO < *self { -self } else { *self }
     }
 }
 
