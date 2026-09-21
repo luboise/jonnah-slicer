@@ -14,6 +14,7 @@ struct InputState {
     pub lmb_down: bool,
     pub rmb_down: bool,
     pub scroll_delta: egui::Vec2,
+    pub space_pressed: bool,
     pub shift_pressed: bool,
     pub zoom_delta: egui::Vec2,
     pub home_pressed: bool,
@@ -23,6 +24,8 @@ struct InputState {
     pub esc_pressed: bool,
     pub number_pressed: Option<u8>,
     pub save_pressed: bool,
+    pub copy_pressed: bool,
+    pub paste_pressed: bool,
 }
 
 impl InputState {
@@ -40,6 +43,7 @@ impl InputState {
                 lmb_down: i.pointer.button_down(egui::PointerButton::Primary),
                 rmb_down: i.pointer.button_down(egui::PointerButton::Secondary),
                 scroll_delta: i.smooth_scroll_delta(),
+                space_pressed: i.consume_key(egui::Modifiers::NONE, egui::Key::Space),
                 shift_pressed: i.modifiers.shift,
                 zoom_delta: i.zoom_delta_2d(),
                 home_pressed: i.consume_key(egui::Modifiers::NONE, egui::Key::Home),
@@ -52,6 +56,8 @@ impl InputState {
                     egui::Modifiers::COMMAND,
                     egui::Key::S,
                 )),
+                copy_pressed: i.consume_key(egui::Modifiers::CTRL, egui::Key::C),
+                paste_pressed: i.consume_key(egui::Modifiers::CTRL, egui::Key::V),
             }
         })
     }
@@ -91,6 +97,9 @@ pub struct JonnahSlicer<'a> {
     copy_from: Option<usize>,
     #[serde(skip)]
     copy_to: Option<usize>,
+
+    #[serde(skip)]
+    selection: Selection,
 
     // whether the project should be refreshed at the start of the next frame
     #[serde(skip)]
@@ -175,6 +184,50 @@ impl LiveProject {
     }
 }
 
+#[derive(Default, Debug)]
+struct Selection {
+    from: Option<(usize, audio::TimePoint)>,
+    to: Option<audio::TimePoint>,
+}
+
+impl Selection {
+    pub fn select(&mut self, index: usize, point: audio::TimePoint) {
+        match (self.from, self.to) {
+            (None, _) => {
+                if self.from.is_none() {
+                    self.from = Some((index, point));
+                    self.to = None;
+                }
+                log::info!("began selection from {index}:{point}");
+            }
+            (Some((i, from)), None) => {
+                self.to = Some(point);
+                log::info!("selecting from {i}:{from} to {index}:{point}");
+            }
+            (Some(_), Some(_)) => {
+                self.from = Some((index, point));
+                self.to = None;
+                log::info!("began selection from {index}:{point}");
+            }
+        }
+    }
+
+    pub fn get_selection(&self) -> Option<(usize, std::ops::Range<audio::TimePoint>)> {
+        if let Some((index, from)) = &self.from
+            && let Some(to) = &self.to
+        {
+            Some((*index, *from..*to))
+        } else {
+            None
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.from = None;
+        self.to = None;
+    }
+}
+
 impl Default for JonnahSlicer<'_> {
     fn default() -> Self {
         Self {
@@ -212,6 +265,7 @@ impl Default for JonnahSlicer<'_> {
             quit_application: false,
             copy_from: None,
             copy_to: None,
+            selection: Selection::default(),
         }
     }
 }
@@ -694,15 +748,47 @@ impl JonnahSlicer<'_> {
                     }
 
                     if let Some(event) = event
-                        && !(stem.locked && !matches!(event, StemEvent::Hovering))
+                        && !(stem.locked && !matches!(event, StemEvent::Hovering(_)))
                     {
                         match event {
-                            StemEvent::Hovering => {
+                            StemEvent::Hovering(sample_clicked) => {
                                 for slice in std::mem::take(&mut self.midi_file_slices) {
                                     stem.stem.slices.insert(slice);
                                 }
                                 if self.input_state.l_pressed {
                                     stem.locked = !stem.locked;
+                                }
+
+                                let Ok(click_point) = crate::audio::TimePoint::from_sample(
+                                    sample_clicked,
+                                    self.project.sample_rate.0,
+                                    &self.project.timing,
+                                ) else {
+                                    log::error!(
+                                        "failed to get time point from sample {sample_clicked}"
+                                    );
+                                    return;
+                                };
+
+                                let quantised = click_point.quantised(self.slice_snapping);
+
+                                if self.input_state.paste_pressed {
+                                    if let Some((index, range)) = self.selection.get_selection() {
+                                        let (from, to) = (range.start, range.end);
+
+                                        let slices = self
+                                            .project
+                                            .stems
+                                            .get(index)
+                                            .unwrap()
+                                            .stem
+                                            .slices
+                                            .clone();
+
+                                        log::info!("pasting!");
+                                    }
+                                } else if self.input_state.space_pressed {
+                                    self.selection.select(stem_i, quantised);
                                 }
                             }
                             StemEvent::PlayAudio(sample_clicked)
@@ -772,25 +858,25 @@ impl JonnahSlicer<'_> {
                                 }
                             }
                             StemEvent::LeftClick(sample_clicked) => {
-                                // shift + left click = initiaite copy
-                                if self.input_state.shift_pressed {
-                                } else {
+                                let Ok(click_point) = crate::audio::TimePoint::from_sample(
+                                    sample_clicked,
+                                    self.project.sample_rate.0,
+                                    &self.project.timing,
+                                ) else {
+                                    log::error!(
+                                        "failed to get time point from sample {sample_clicked}"
+                                    );
+                                    return;
+                                };
+
+                                // shift + left click = initiate copy
+                                if !self.input_state.shift_pressed {
                                     log::trace!("clicked at {sample_clicked} samples");
 
-                                    let Ok(time_point) = crate::audio::TimePoint::from_sample(
-                                        sample_clicked,
-                                        self.project.sample_rate.0,
-                                        &self.project.timing,
-                                    ) else {
-                                        log::error!(
-                                            "failed to get time point from sample {sample_clicked}"
-                                        );
-                                        return;
-                                    };
-
-                                    stem.stem.slices_mut().insert(crate::project::Slice {
-                                        time_point: time_point.quantised(self.slice_snapping),
-                                    });
+                                    let time_point = click_point.quantised(self.slice_snapping);
+                                    stem.stem
+                                        .slices_mut()
+                                        .insert(crate::project::Slice { time_point });
                                 }
                             }
 
@@ -964,12 +1050,8 @@ impl eframe::App for JonnahSlicer<'_> {
                 ProjectStatus::Loaded => (),
             }
         }
-        if ctx.input_mut(|ui| {
-            ui.consume_shortcut(&egui::KeyboardShortcut::new(
-                egui::Modifiers::COMMAND,
-                egui::Key::S,
-            ))
-        }) && let Err(e) = self.save_to_disk()
+        if self.input_state.save_pressed
+            && let Err(e) = self.save_to_disk()
         {
             log::error!("failed to save project: {e}");
         }
@@ -1097,6 +1179,7 @@ impl eframe::App for JonnahSlicer<'_> {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.draw_top_bar(ui);
+        self.draw_options(ui);
 
         egui::CentralPanel::default().show_inside(ui, |ui| {
             if let Some(jonnah) = &self.jonnah_image {
@@ -1146,7 +1229,7 @@ fn powered_by_egui_and_eframe(ui: &mut egui::Ui) {
 }
 
 enum StemEvent {
-    Hovering,
+    Hovering(usize),
     LeftClick(usize),
     RightClick(usize),
     PlayAudio(usize),
@@ -1350,11 +1433,11 @@ fn draw_stem(
     if let Some(mouse_pos) = &input_state.mouse_pos
         && rect.contains(*mouse_pos)
     {
-        // default to hovering if no other event is met
-        event = Some(StemEvent::Hovering);
-
         let sample_clicked =
             (start_sample as f64 + mouse_x_ratio as f64 * visual_samples as f64).round() as usize;
+
+        // default to hovering if no other event is met
+        event = Some(StemEvent::Hovering(sample_clicked));
 
         if response.middle_clicked() || input_state.g_pressed {
             let sample_clicked = (start_sample as f64
