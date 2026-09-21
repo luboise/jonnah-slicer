@@ -360,30 +360,6 @@ impl JonnahSlicer<'_> {
                 egui::widgets::global_theme_preference_buttons(ui);
             });
         });
-
-        ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
-            ui.label("Snapping: ");
-            const SNAPPINGS: [u16; 12] = [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 64, 128];
-
-            for snap_v in SNAPPINGS {
-                let button = ui.button(format!("1/{snap_v}"));
-
-                if self.slice_snapping.as_measure_denom() == snap_v {
-                    button.highlight();
-                } else {
-                    if let Some(num) = self.input_state.number_pressed {
-                        //    [1, 2, 3, ..., 9, 0]
-                        // => [0, 1, 2, 3, ..., 8, 9]
-                        let num = (num + 9) % 10;
-
-                        self.slice_snapping =
-                            crate::audio::Snapping::Measure(SNAPPINGS[num as usize]);
-                    } else if button.clicked() {
-                        self.slice_snapping = crate::audio::Snapping::Measure(snap_v);
-                    }
-                }
-            }
-        });
     }
 
     pub fn draw_options(&mut self, ui: &mut egui::Ui) {
@@ -518,6 +494,30 @@ impl JonnahSlicer<'_> {
                         &self.project.as_project(),
                     ) {
                         log::error!("failed to export BMS file: {e}");
+                    }
+                }
+            });
+
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                ui.label("Snapping: ");
+                const SNAPPINGS: [u16; 12] = [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 64, 128];
+
+                for snap_v in SNAPPINGS {
+                    let button = ui.button(format!("1/{snap_v}"));
+
+                    if self.slice_snapping.as_measure_denom() == snap_v {
+                        button.highlight();
+                    } else {
+                        if let Some(num) = self.input_state.number_pressed {
+                            //    [1, 2, 3, ..., 9, 0]
+                            // => [0, 1, 2, 3, ..., 8, 9]
+                            let num = (num + 9) % 10;
+
+                            self.slice_snapping =
+                                crate::audio::Snapping::Measure(SNAPPINGS[num as usize]);
+                        } else if button.clicked() {
+                            self.slice_snapping = crate::audio::Snapping::Measure(snap_v);
+                        }
                     }
                 }
             });
@@ -1192,25 +1192,10 @@ impl eframe::App for JonnahSlicer<'_> {
             ));
 
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                powered_by_egui_and_eframe(ui);
                 egui::warn_if_debug_build(ui);
             });
         });
     }
-}
-
-fn powered_by_egui_and_eframe(ui: &mut egui::Ui) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        ui.label("Powered by ");
-        ui.hyperlink_to("egui", "https://github.com/emilk/egui");
-        ui.label(" and ");
-        ui.hyperlink_to(
-            "eframe",
-            "https://github.com/emilk/egui/tree/master/crates/eframe",
-        );
-        ui.label(".");
-    });
 }
 
 enum StemEvent {
