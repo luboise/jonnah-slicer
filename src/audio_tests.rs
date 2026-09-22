@@ -152,5 +152,5 @@ fn test_time_points() -> [Slice; 38] {
         TimePoint::from_submeasure(8, 14, 16),
         TimePoint::from_submeasure(8, 15, 16),
     ]
-    .map(|time_point| -> Slice { Slice { time_point } })
+    .map(|tp| Slice::new(tp))
 }

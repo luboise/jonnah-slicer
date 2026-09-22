@@ -36,9 +36,8 @@ pub(crate) fn slices_from_midi(
                 message,
             } => match message {
                 MidiMessage::NoteOn { key: _, vel: _ } => {
-                    slices.push(project::Slice {
-                        time_point: audio::TimePoint::from_time(microseconds, timing)?,
-                    });
+                    let tp = audio::TimePoint::from_time(microseconds, timing)?;
+                    slices.push(project::Slice::new(tp));
                 }
                 MidiMessage::NoteOff { key: _, vel: _ }
                 | MidiMessage::Aftertouch { key: _, vel: _ }

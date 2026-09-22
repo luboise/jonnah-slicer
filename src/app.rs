@@ -2,7 +2,7 @@ use std::hash::{Hash as _, Hasher as _};
 
 use egui::{Button, emath::Numeric as _};
 
-use audio::RatioExt;
+use audio::RatioExt as _;
 
 use crate::audio::{self, calculate_num_samples};
 
@@ -13,6 +13,7 @@ struct InputState {
     pub mouse_pos: Option<egui::Pos2>,
     pub lmb_down: bool,
     pub rmb_down: bool,
+    pub command_down: bool,
     pub scroll_delta: egui::Vec2,
     pub space_pressed: bool,
     pub shift_pressed: bool,
@@ -58,6 +59,7 @@ impl InputState {
                 )),
                 copy_pressed: i.consume_key(egui::Modifiers::CTRL, egui::Key::C),
                 paste_pressed: i.consume_key(egui::Modifiers::CTRL, egui::Key::V),
+                command_down: i.modifiers.cmd_ctrl_matches(egui::Modifiers::COMMAND),
             }
         })
     }
@@ -100,6 +102,9 @@ pub struct JonnahSlicer<'a> {
 
     #[serde(skip)]
     selection: Selection,
+
+    #[serde(skip)]
+    painting_keysound: Option<(usize, audio::TimePoint)>,
 
     // whether the project should be refreshed at the start of the next frame
     #[serde(skip)]
@@ -270,6 +275,7 @@ impl Default for JonnahSlicer<'_> {
             copy_to: None,
             selection: Selection::default(),
             stem_events: vec![],
+            painting_keysound: None,
         }
     }
 }
@@ -845,6 +851,8 @@ impl JonnahSlicer<'_> {
     }
 
     fn handle_stem_events(&mut self) {
+        const SENSE_DISTANCE: f64 = 0.075;
+
         for (stem_i, event) in std::mem::take(&mut self.stem_events) {
             let Some(stem) = self.project.stems.get_mut(stem_i) else {
                 continue;
@@ -865,7 +873,7 @@ impl JonnahSlicer<'_> {
                         &self.project.timing,
                     ) else {
                         log::error!("failed to get time point from sample {sample_clicked}");
-                        return;
+                        continue;
                     };
 
                     let quantised = click_point.quantised(self.slice_snapping);
@@ -963,17 +971,60 @@ impl JonnahSlicer<'_> {
                         &self.project.timing,
                     ) else {
                         log::error!("failed to get time point from sample {sample_clicked}");
-                        return;
+                        continue;
                     };
 
-                    // shift + left click = initiate copy
-                    if !self.input_state.shift_pressed {
-                        log::trace!("clicked at {sample_clicked} samples");
+                    // Command + LMB = paint keysound
+                    if self.input_state.command_down {
+                        let Some((from_slice_i, from_tp)) = &self.painting_keysound else {
+                            log::info!(
+                                "nothing to paint with! use Cmd/Ctrl + RMB to begin painting"
+                            );
+                            continue;
+                        };
 
-                        let time_point = click_point.quantised(self.slice_snapping);
-                        stem.stem
-                            .slices_mut()
-                            .insert(crate::project::Slice { time_point });
+                        let Some((from_slice_index, _)) = self
+                            .project
+                            .stems
+                            .get(*from_slice_i)
+                            .and_then(|live| live.stem.slices.query(*from_tp))
+                        else {
+                            log::warn!("stem {from_slice_i}: slice at tp {from_tp} does not exist");
+                            continue;
+                        };
+
+                        let Some((paint_to, _)) =
+                            &mut self.project.stems.get_mut(stem_i).and_then(|live| {
+                                live.stem
+                                    .slices
+                                    .closest_bound_mut(click_point, SENSE_DISTANCE)
+                            })
+                        else {
+                            log::warn!("no slice close enough");
+                            continue;
+                        };
+
+                        if paint_to.time_point < *from_tp {
+                            log::warn!("a reference must be placed AFTER the original keysound");
+                            continue;
+                        }
+
+                        paint_to.keysound_id =
+                            crate::project::SliceKeysound::Reference(from_slice_index);
+
+                        log::info!("stem {stem_i}: painted a slice at {}", paint_to.time_point);
+                    }
+                    // LMB = create slice
+                    else {
+                        // shift + left click = initiate copy
+                        if !self.input_state.shift_pressed {
+                            log::trace!("clicked at {sample_clicked} samples");
+
+                            let time_point = click_point.quantised(self.slice_snapping);
+                            stem.stem
+                                .slices_mut()
+                                .insert(crate::project::Slice::new(time_point));
+                        }
                     }
                 }
 
@@ -984,15 +1035,29 @@ impl JonnahSlicer<'_> {
                         &self.project.timing,
                     ) else {
                         log::error!("failed to get time point from sample {sample_clicked}");
-                        return;
+                        continue;
                     };
 
-                    const DELETE_DISTANCE: f64 = 0.075;
-
-                    stem.stem.slices.0.retain(|slice| {
-                        (slice.time_point - time_point).to_f64().abs()
-                            > DELETE_DISTANCE * (self.zoom_level as f64)
-                    });
+                    // Command + RMB = begin slice paint
+                    if self.input_state.command_down {
+                        if let Some((closest, _)) =
+                            stem.stem.slices.closest_bound(time_point, SENSE_DISTANCE)
+                        {
+                            log::info!(
+                                "stem {stem_i}: selected slice at {time_point} for painting"
+                            );
+                            self.painting_keysound = Some((stem_i, closest.time_point));
+                        } else {
+                            log::info!("no slice in range to copy for painting");
+                        }
+                    }
+                    // RMB = delete slice
+                    else {
+                        stem.stem.slices.0.retain(|slice| {
+                            (slice.time_point - time_point).to_f64().abs()
+                                > SENSE_DISTANCE * (self.zoom_level as f64)
+                        });
+                    }
                 }
                 StemEvent::PlayAudio(_) => (),
             }
@@ -1013,8 +1078,8 @@ impl eframe::App for JonnahSlicer<'_> {
         if self.input_state.esc_pressed {
             self.copy_from = None;
             self.copy_to = None;
-
             self.selection.clear();
+            self.painting_keysound = None;
 
             if let Some(player) = &mut self.audio_player {
                 player.stop();
@@ -1313,7 +1378,9 @@ fn draw_stem(
     painter.rect_filled(rect, 0.0, background_color);
 
     const SLICE_COLOUR: egui::Color32 = egui::Color32::WHITE;
-    let stroke = egui::Stroke::new(3.0f32, SLICE_COLOUR);
+    let slice_stroke = egui::Stroke::new(3.0f32, SLICE_COLOUR);
+    const REF_SLICE_COLOUR: egui::Color32 = egui::Color32::PURPLE;
+    let ref_slice_stroke = egui::Stroke::new(3.0f32, REF_SLICE_COLOUR);
 
     let mouse_x_ratio = {
         let x1 = rect.min.x;
@@ -1409,18 +1476,28 @@ fn draw_stem(
 
         let ratio = (sample - start) as f32 / (width_samples) as f32;
 
-        draw_line(&painter, stroke, rect, ratio);
+        let (stroke, colour, slice_id) = match slice.keysound_id {
+            crate::project::SliceKeysound::Auto => (
+                slice_stroke,
+                SLICE_COLOUR,
+                i as u64 + live_stem.stem.starting_keysound.unwrap_or(1),
+            ),
+            crate::project::SliceKeysound::Reference(r) => (
+                ref_slice_stroke,
+                REF_SLICE_COLOUR,
+                // TODO: Go get the actual slice from earlier
+                i as u64 + live_stem.stem.starting_keysound.unwrap_or(1),
+            ),
+        };
 
+        draw_line(&painter, stroke, rect, ratio);
         let tx = rect.min.x + ratio * (rect.max.x - rect.min.x);
         painter.text(
             [tx, rect.max.y].into(),
             egui::Align2::LEFT_BOTTOM,
-            format!(
-                "{:0>2}",
-                base62::encode(i as u64 + live_stem.stem.starting_keysound.unwrap_or(1))
-            ),
+            format!("{:0>2}", base62::encode(slice_id)),
             egui::FontId::default(),
-            SLICE_COLOUR,
+            colour,
         );
     }
 

@@ -1,7 +1,39 @@
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, PartialOrd)]
+use crate::audio::RatioExt;
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+pub enum SliceKeysound {
+    #[default]
+    Auto,
+    /// Reference to a keysound at a specific index
+    Reference(usize),
+    // Absolute(u64), // TODO: Implement absolute keysounding
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Slice {
     pub time_point: crate::audio::TimePoint,
-    // Room here later to add de-duplication of keysounds and custom keysound IDs
+    #[serde(default)]
+    pub keysound_id: SliceKeysound,
+}
+
+impl Slice {
+    pub fn new(time_point: crate::audio::TimePoint) -> Self {
+        Self {
+            time_point,
+            keysound_id: SliceKeysound::default(),
+        }
+    }
+}
+
+impl PartialOrd for Slice {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        let Self {
+            time_point,
+            keysound_id: _,
+        } = self;
+
+        time_point.partial_cmp(&other.time_point)
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default)]
@@ -40,6 +72,14 @@ impl Slices {
         }
     }
 
+    /// get the slice corresponding with a specific timepoint
+    pub fn query(&self, time: crate::audio::TimePoint) -> Option<(usize, &Slice)> {
+        self.0
+            .iter()
+            .enumerate()
+            .find(|(_, slice)| slice.time_point == time)
+    }
+
     pub fn query_range(
         &self,
         range: std::range::RangeInclusive<crate::audio::TimePoint>,
@@ -48,6 +88,60 @@ impl Slices {
             .iter()
             .filter(|slice| range.contains(&slice.time_point))
             .collect()
+    }
+
+    /// Get the closest slice to a specific time point (in measures)
+    ///
+    /// Returns (slice, ABS(distance)) if found
+    pub fn closest(
+        &self,
+        time_point: crate::audio::TimePoint,
+    ) -> Option<(&Slice, crate::audio::TimePoint)> {
+        log::trace!("getting closest slice to {time_point:?}");
+
+        self.0
+            .iter()
+            .map(|slice| (slice, (slice.time_point - time_point).abs()))
+            .min_by_key(|(_, distance)| *distance)
+    }
+
+    /// [`Self::closest`] but mut ref to slice
+    pub fn closest_mut(
+        &mut self,
+        time_point: crate::audio::TimePoint,
+    ) -> Option<(&mut Slice, crate::audio::TimePoint)> {
+        self.0
+            .iter_mut()
+            .map(|slice| {
+                // copy before moving &mut slice
+                let tp = slice.time_point;
+                (slice, (tp - time_point).abs())
+            })
+            .min_by_key(|(_, distance)| *distance)
+    }
+
+    /// Get the closest slice to a specific time point (in measures), which is <= distance apart
+    ///
+    /// This prevents closest from returning a value which is too far away
+    ///
+    /// Returns (slice, ABS(distance)) if found
+    pub fn closest_bound(
+        &self,
+        time_point: crate::audio::TimePoint,
+        measures_bound: f64,
+    ) -> Option<(&Slice, crate::audio::TimePoint)> {
+        self.closest(time_point)
+            .filter(|(_, d)| d.to_f64() <= measures_bound)
+    }
+
+    /// [`Self::closest_bound`] but mut ref to slice
+    pub fn closest_bound_mut(
+        &mut self,
+        time_point: crate::audio::TimePoint,
+        measures_bound: f64,
+    ) -> Option<(&mut Slice, crate::audio::TimePoint)> {
+        self.closest_mut(time_point)
+            .filter(|(_, d)| d.to_f64() <= measures_bound)
     }
 }
 
