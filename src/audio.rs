@@ -612,7 +612,18 @@ pub fn export_stem(
             timing,
             audio.num_samples_per_channel(),
         )?;
-        let cuts = audio.cuts_from_sample_counts(starting_sample, &cuts)?;
+
+        let mut cuts = audio.cuts_from_sample_counts(starting_sample, &cuts)?;
+
+        // remove cuts which are references to other cuts
+        for (i, slice) in slices.iter().enumerate().rev() {
+            if matches!(
+                slice.keysound_id,
+                crate::project::SliceKeysound::Reference(_)
+            ) {
+                cuts.remove(i);
+            }
+        }
 
         all_cuts.push(cuts);
     }
