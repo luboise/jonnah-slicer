@@ -39,6 +39,16 @@ impl Slices {
             self.insert(slice.clone());
         }
     }
+
+    pub fn query_range(
+        &self,
+        range: std::range::RangeInclusive<crate::audio::TimePoint>,
+    ) -> Vec<&Slice> {
+        self.0
+            .iter()
+            .filter(|slice| range.contains(&slice.time_point))
+            .collect()
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Default, Debug, Clone, Copy)]

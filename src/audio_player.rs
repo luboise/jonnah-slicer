@@ -155,6 +155,14 @@ impl AudioPlayer {
         }
     }
 
+    pub fn stop(&self) {
+        let Ok(mut audio_files) = self.audio_files.lock() else {
+            log::error!("failed to stop audio player: bad mutex");
+            return;
+        };
+        audio_files.clear();
+    }
+
     pub fn volume(&self) -> f32 {
         *self.volume.read().expect("failed to get volume")
     }

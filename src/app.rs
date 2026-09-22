@@ -215,7 +215,7 @@ impl Selection {
         }
     }
 
-    pub fn get_selection(&self) -> Option<(usize, std::ops::Range<audio::TimePoint>)> {
+    pub fn get(&self) -> Option<(usize, std::ops::Range<audio::TimePoint>)> {
         if let Some((index, from)) = &self.from
             && let Some(to) = &self.to
         {
@@ -732,14 +732,34 @@ impl JonnahSlicer<'_> {
                     )
                     .unwrap();
 
-                    if let Some(col) = &stem.stem.group {}
-
                     if stem.locked {
                         ui.painter().rect_filled(
                             rect,
                             0,
                             egui::Color32::from_rgba_premultiplied(0, 0, 0, 125),
                         );
+                    }
+
+                    if let Some((i, range)) = self.selection.get()
+                        && i == stem_i
+                    {
+                        let start = calculate_num_samples(
+                            crate::audio::TimePoint::default(),
+                            self.display_start,
+                            self.project.sample_rate,
+                            1,
+                            &self.project.timing,
+                        )
+                        .unwrap();
+
+                        let end = calculate_num_samples(
+                            crate::audio::TimePoint::default(),
+                            end_time_point,
+                            self.project.sample_rate,
+                            1,
+                            &self.project.timing,
+                        )
+                        .unwrap();
                     }
 
                     if let Some(event) = event
@@ -851,12 +871,29 @@ impl JonnahSlicer<'_> {
                     let quantised = click_point.quantised(self.slice_snapping);
 
                     if self.input_state.paste_pressed {
-                        if let Some((index, range)) = self.selection.get_selection() {
+                        if let Some((index, range)) = self.selection.get() {
                             let (from, to) = (range.start, range.end);
 
-                            let slices = self.project.stems.get(index).unwrap().stem.slices.clone();
+                            if let Some(mut copied_slices) =
+                                self.project.stems.get(index).map(|v| v.stem.slices.clone())
+                            {
+                                copied_slices
+                                    .0
+                                    .retain(|v| from <= v.time_point && v.time_point <= to);
 
-                            log::info!("pasting!");
+                                for slice in &mut copied_slices.0 {
+                                    slice.time_point += quantised - from;
+                                }
+
+                                self.project.stems[stem_i].stem.slices.union(&copied_slices);
+
+                                log::info!(
+                                    "Stem {stem_i}: pasted {} samples at {quantised}",
+                                    copied_slices.0.len()
+                                );
+                            } else {
+                                log::warn!("can't copy from no stem");
+                            }
                         }
                     } else if self.input_state.space_pressed {
                         self.selection.select(stem_i, quantised);
@@ -976,6 +1013,14 @@ impl eframe::App for JonnahSlicer<'_> {
         if self.input_state.esc_pressed {
             self.copy_from = None;
             self.copy_to = None;
+
+            self.selection.clear();
+
+            if let Some(player) = &mut self.audio_player {
+                player.stop();
+            }
+
+            log::info!("cleared selection");
         }
 
         if let Some(copy_from) = self.copy_from
