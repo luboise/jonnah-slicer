@@ -1,10 +1,7 @@
-use std::hash::{Hash as _, Hasher as _};
-
-use egui::{Button, emath::Numeric as _};
-
-use audio::RatioExt as _;
-
 use crate::audio::{self, calculate_num_samples};
+use audio::RatioExt as _;
+use egui::{Button, emath::Numeric as _};
+use std::hash::{Hash as _, Hasher as _};
 
 pub const STEM_HEIGHT: f32 = 200.0;
 
@@ -890,29 +887,54 @@ impl JonnahSlicer<'_> {
 
                     let quantised = click_point.quantised(self.slice_snapping);
 
-                    if self.input_state.paste_pressed {
-                        if let Some((index, range)) = self.selection.get() {
+                    if self.input_state.paste_pressed | self.input_state.ref_paste_pressed {
+                        let mut handle_paste = || -> Result<_, crate::Error> {
+                            use crate::project::SliceKeysound;
+
+                            let Some((index, range)) = self.selection.get() else {
+                                return Ok(None);
+                            };
+
                             let (from, to) = (range.start, range.end);
 
-                            if let Some(mut copied_slices) =
-                                self.project.stems.get(index).map(|v| v.stem.slices.clone())
-                            {
-                                copied_slices
-                                    .0
-                                    .retain(|v| from <= v.time_point && v.time_point <= to);
+                            let mut translated = self
+                                .project
+                                .stems
+                                .get(index)
+                                .map(|v| v.stem.slices.clone())
+                                .ok_or("can't copy from no stem")?;
 
-                                for slice in &mut copied_slices.0 {
-                                    slice.time_point += quantised - from;
+                            translated
+                                .0
+                                .retain(|v| from <= v.time_point && v.time_point <= to);
+
+                            for slice in &mut translated.0 {
+                                if self.input_state.ref_paste_pressed
+                                    && matches!(slice.keysound_id, SliceKeysound::Auto)
+                                {
+                                    // can use own time point because it hasn't been translated yet
+                                    slice.keysound_id = SliceKeysound::Reference(slice.time_point);
                                 }
 
-                                self.project.stems[stem_i].stem.slices.union(&copied_slices);
+                                slice.time_point += quantised - from;
+                            }
 
+                            self.project.stems[stem_i].stem.slices.union(&translated);
+
+                            Ok(Some(translated.0.len()))
+                        };
+
+                        match handle_paste() {
+                            Ok(Some(num_copied)) => {
                                 log::info!(
-                                    "Stem {stem_i}: pasted {} samples at {quantised}",
-                                    copied_slices.0.len()
+                                    "Stem {stem_i}: pasted {num_copied} samples at {quantised}"
                                 );
-                            } else {
-                                log::warn!("can't copy from no stem");
+                            }
+                            Ok(None) => {
+                                log::info!("No selection available");
+                            }
+                            Err(e) => {
+                                log::error!("failed to paste: {e}");
                             }
                         }
                     } else if self.input_state.space_pressed {
@@ -996,13 +1018,14 @@ impl JonnahSlicer<'_> {
                         };
 
                         // prevent missing references when painting
-                        if self
+
+                        // TODO: Make this follow references if painting from a reference
+                        let Some((_, _paint_from)) = self
                             .project
                             .stems
                             .get(*from_slice_i)
                             .and_then(|live| live.stem.slices.query(*from_tp))
-                            .is_none()
-                        {
+                        else {
                             log::warn!("stem {from_slice_i}: slice at tp {from_tp} does not exist");
                             continue;
                         };
