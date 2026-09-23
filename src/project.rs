@@ -1,11 +1,11 @@
-use crate::audio::RatioExt;
+use crate::audio::RatioExt as _;
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub enum SliceKeysound {
     #[default]
     Auto,
     /// Reference to a keysound at a specific index
-    Reference(usize),
+    Reference(crate::audio::TimePoint),
     // Absolute(u64), // TODO: Implement absolute keysounding
 }
 
@@ -78,6 +78,42 @@ impl Slices {
             .iter()
             .enumerate()
             .find(|(_, slice)| slice.time_point == time)
+    }
+
+    pub fn keysounds(&self) -> impl Iterator<Item = &Slice> {
+        self.0
+            .iter()
+            .filter(|slice| matches!(slice.keysound_id, SliceKeysound::Auto))
+    }
+
+    pub fn keysound_index_of(&self, index: usize) -> Option<usize> {
+        let slice = self.0.get(index)?;
+
+        match slice.keysound_id {
+            SliceKeysound::Auto => Some(
+                self.0[..index]
+                    .iter()
+                    .filter(|v| matches!(v.keysound_id, SliceKeysound::Auto))
+                    .count(),
+            ),
+            SliceKeysound::Reference(ref_tp) => self
+                .keysounds()
+                .position(|slice| slice.time_point == ref_tp),
+        }
+    }
+
+    /// get n'th slice which is NOT a reference
+    ///
+    /// Used for resolving which slice a reference is pointing to
+    pub fn query_referenced(&self, ref_index: usize) -> Option<(usize, &Slice)> {
+        self.0
+            .iter()
+            .enumerate()
+            .filter(|(_, slice)| match slice.keysound_id {
+                SliceKeysound::Auto => true,
+                SliceKeysound::Reference(_) => false,
+            })
+            .nth(ref_index)
     }
 
     pub fn query_range(
@@ -339,4 +375,39 @@ pub fn calculate_initial_keysounds(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_keysounds() {
+        use crate::audio::TimePoint;
+        use SliceKeysound::{Auto, Reference};
+
+        let auto = |m| Slice {
+            time_point: TimePoint::from_measure(m),
+            keysound_id: Auto,
+        };
+
+        let reference = |m, r| Slice {
+            time_point: TimePoint::from_measure(m),
+            keysound_id: Reference(TimePoint::from_integer(r)),
+        };
+
+        let slices = Slices(vec![
+            auto(0),
+            auto(1),
+            reference(2, 0),
+            auto(3),
+            reference(4, 1),
+        ]);
+
+        assert_eq!(slices.keysound_index_of(0), Some(0));
+        assert_eq!(slices.keysound_index_of(1), Some(1));
+        assert_eq!(slices.keysound_index_of(2), Some(0));
+        assert_eq!(slices.keysound_index_of(3), Some(2));
+        assert_eq!(slices.keysound_index_of(4), Some(1));
+    }
 }

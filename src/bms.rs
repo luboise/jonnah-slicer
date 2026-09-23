@@ -65,30 +65,29 @@ impl TryFrom<crate::project::Project> for bms_rs::bms::model::Bms {
                     .ok_or("no extension")?,
             );
 
-            let mut slices = vec![];
+            let mut obj_ids = vec![];
 
-            for slice in &stem.slices.0 {
-                // if its a ref, go find the existing wav and use it
-                let wav_obj_id =
-                    if let crate::project::SliceKeysound::Reference(ref_i) = slice.keysound_id {
-                        slices
-                            .get(ref_i)
-                            .ok_or_else(|| format!("ref {ref_i} points to non-existant slice"))
-                            .copied()?
-                    } else {
-                        // otherwise, it's a new keysound. insert it
-                        let mut encoded = base62::encode(obj_id + slices.len() as u64);
-                        if encoded.len() == 1 {
-                            encoded.insert(0, '0');
-                        }
+            for (slice_i, slice) in stem.slices.0.iter().enumerate() {
+                if matches!(slice.keysound_id, crate::project::SliceKeysound::Auto) {
+                    // otherwise, it's a new keysound. insert it
+                    let mut encoded = base62::encode(obj_id + obj_ids.len() as u64);
+                    if encoded.len() == 1 {
+                        encoded.insert(0, '0');
+                    }
 
-                        let wav_path = format!("{file_stem}_{:03}.{file_extension}", slices.len());
-                        let wav_obj_id = bms_rs::bms::command::ObjId::try_from(&encoded, true)?;
-                        wav_files.insert(wav_obj_id, wav_path.into());
+                    let wav_path = format!("{file_stem}_{:03}.{file_extension}", obj_ids.len());
+                    let wav_obj_id = bms_rs::bms::command::ObjId::try_from(&encoded, true)?;
+                    wav_files.insert(wav_obj_id, wav_path.into());
 
-                        slices.push(wav_obj_id);
-                        wav_obj_id
-                    };
+                    obj_ids.push(wav_obj_id);
+                }
+
+                let wav_obj_id = stem
+                    .slices
+                    .keysound_index_of(slice_i)
+                    .and_then(|i| obj_ids.get(i))
+                    .copied()
+                    .ok_or_else(|| format!("slice {slice_i} points to non-existant keysound"))?;
 
                 match stem.ty {
                     crate::project::StemType::Note if num_note_channels < 8 => {

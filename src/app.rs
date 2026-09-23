@@ -26,6 +26,7 @@ struct InputState {
     pub number_pressed: Option<u8>,
     pub save_pressed: bool,
     pub copy_pressed: bool,
+    pub ref_paste_pressed: bool,
     pub paste_pressed: bool,
 }
 
@@ -58,6 +59,8 @@ impl InputState {
                     egui::Key::S,
                 )),
                 copy_pressed: i.consume_key(egui::Modifiers::CTRL, egui::Key::C),
+                ref_paste_pressed: i
+                    .consume_key(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, egui::Key::V),
                 paste_pressed: i.consume_key(egui::Modifiers::CTRL, egui::Key::V),
                 command_down: i.modifiers.cmd_ctrl_matches(egui::Modifiers::COMMAND),
             }
@@ -91,6 +94,8 @@ pub struct JonnahSlicer<'a> {
     zoom_level: f32,
     audio_volume: f32,
     group_colour_opacity: f32,
+
+    lock_all_on_startup: bool,
 
     #[serde(skip)]
     quit_application: bool,
@@ -276,6 +281,7 @@ impl Default for JonnahSlicer<'_> {
             selection: Selection::default(),
             stem_events: vec![],
             painting_keysound: None,
+            lock_all_on_startup: true,
         }
     }
 }
@@ -360,6 +366,12 @@ impl JonnahSlicer<'_> {
                             }
                         }
                     })
+                });
+
+                ui.menu_button("Settings", |ui| {
+                    if ui.selectable_label(self.lock_all_on_startup, "Lock Stems On Startup").clicked() {
+                        self.lock_all_on_startup = !self.lock_all_on_startup;
+                    }
                 });
 
                 ui.add_space(16.0);
@@ -983,12 +995,14 @@ impl JonnahSlicer<'_> {
                             continue;
                         };
 
-                        let Some((from_slice_index, _)) = self
+                        // prevent missing references when painting
+                        if self
                             .project
                             .stems
                             .get(*from_slice_i)
                             .and_then(|live| live.stem.slices.query(*from_tp))
-                        else {
+                            .is_none()
+                        {
                             log::warn!("stem {from_slice_i}: slice at tp {from_tp} does not exist");
                             continue;
                         };
@@ -1009,8 +1023,7 @@ impl JonnahSlicer<'_> {
                             continue;
                         }
 
-                        paint_to.keysound_id =
-                            crate::project::SliceKeysound::Reference(from_slice_index);
+                        paint_to.keysound_id = crate::project::SliceKeysound::Reference(*from_tp);
 
                         log::info!("stem {stem_i}: painted a slice at {}", paint_to.time_point);
                     }
@@ -1131,6 +1144,12 @@ impl eframe::App for JonnahSlicer<'_> {
                     self.project = crate::project::load_project(project_path)
                         .and_then(|project| project.try_into())
                         .unwrap_or_default();
+
+                    if self.lock_all_on_startup {
+                        for stem in &mut self.project.stems {
+                            stem.locked = true;
+                        }
+                    }
 
                     if self.audio_player.is_some() {
                         let new_audio_player =
@@ -1410,19 +1429,6 @@ fn draw_stem(
         );
     }
 
-    let slices = live_stem
-        .stem
-        .slices
-        .iter()
-        .enumerate()
-        .filter_map(|(slice_i, slice)| {
-            if !(start_time..=end_time).contains(&slice.time_point) {
-                return None;
-            }
-
-            Some((slice_i, slice.clone()))
-        });
-
     for i in start_time.to_integer()..end_time.to_integer() {
         let measure_sample_index = calculate_num_samples(
             Default::default(),
@@ -1461,6 +1467,19 @@ fn draw_stem(
         draw_line(&painter, stroke, rect, ratio);
     }
 
+    let slices = live_stem
+        .stem
+        .slices
+        .iter()
+        .enumerate()
+        .filter_map(|(slice_i, slice)| {
+            if !(start_time..=end_time).contains(&slice.time_point) {
+                return None;
+            }
+
+            Some((slice_i, slice.clone()))
+        });
+
     for (i, slice) in slices {
         let sample = calculate_num_samples(
             Default::default(),
@@ -1476,18 +1495,13 @@ fn draw_stem(
 
         let ratio = (sample - start) as f32 / (width_samples) as f32;
 
-        let (stroke, colour, slice_id) = match slice.keysound_id {
-            crate::project::SliceKeysound::Auto => (
-                slice_stroke,
-                SLICE_COLOUR,
-                i as u64 + live_stem.stem.starting_keysound.unwrap_or(1),
-            ),
-            crate::project::SliceKeysound::Reference(r) => (
-                ref_slice_stroke,
-                REF_SLICE_COLOUR,
-                // TODO: Go get the actual slice from earlier
-                i as u64 + live_stem.stem.starting_keysound.unwrap_or(1),
-            ),
+        // TODO: Print an error here but don't do it every single frame
+        let keysound_index = live_stem.stem.slices.keysound_index_of(i).unwrap_or(0);
+        let obj_id = live_stem.stem.starting_keysound.unwrap_or(1) + keysound_index as u64;
+
+        let (stroke, colour) = match slice.keysound_id {
+            crate::project::SliceKeysound::Auto => (slice_stroke, SLICE_COLOUR),
+            crate::project::SliceKeysound::Reference(_) => (ref_slice_stroke, REF_SLICE_COLOUR),
         };
 
         draw_line(&painter, stroke, rect, ratio);
@@ -1495,7 +1509,7 @@ fn draw_stem(
         painter.text(
             [tx, rect.max.y].into(),
             egui::Align2::LEFT_BOTTOM,
-            format!("{:0>2}", base62::encode(slice_id)),
+            format!("{:0>2}", base62::encode(obj_id)),
             egui::FontId::default(),
             colour,
         );
