@@ -1518,13 +1518,28 @@ fn draw_stem(
 
         let ratio = (sample - start) as f32 / (width_samples) as f32;
 
-        // TODO: Print an error here but don't do it every single frame
-        let keysound_index = live_stem.stem.slices.keysound_index_of(i).unwrap_or(0);
-        let obj_id = live_stem.stem.starting_keysound.unwrap_or(1) + keysound_index as u64;
+        let obj_id = live_stem
+            .stem
+            .slices
+            .keysound_index_of(i)
+            .map(|index| index as u64 + live_stem.stem.starting_keysound.unwrap_or(1));
 
-        let (stroke, colour) = match slice.keysound_id {
-            crate::project::SliceKeysound::Auto => (slice_stroke, SLICE_COLOUR),
-            crate::project::SliceKeysound::Reference(_) => (ref_slice_stroke, REF_SLICE_COLOUR),
+        let slice_label = if let Some(obj_id) = obj_id {
+            format!("{:0>2}", base62::encode(obj_id))
+        } else {
+            "ERR".into()
+        };
+
+        let (stroke, colour) = if obj_id.is_some() {
+            match slice.keysound_id {
+                crate::project::SliceKeysound::Auto => (slice_stroke, SLICE_COLOUR),
+                crate::project::SliceKeysound::Reference(_) => (ref_slice_stroke, REF_SLICE_COLOUR),
+            }
+        } else {
+            (
+                egui::Stroke::new(slice_stroke.width, egui::Color32::BLACK),
+                egui::Color32::DARK_RED,
+            )
         };
 
         draw_line(&painter, stroke, rect, ratio);
@@ -1532,7 +1547,7 @@ fn draw_stem(
         painter.text(
             [tx, rect.max.y].into(),
             egui::Align2::LEFT_BOTTOM,
-            format!("{:0>2}", base62::encode(obj_id)),
+            slice_label,
             egui::FontId::default(),
             colour,
         );
