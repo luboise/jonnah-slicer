@@ -242,6 +242,29 @@ impl LiveProject {
 
         (groups, strays)
     }
+
+    pub fn refresh(&mut self) {
+        self.stems.sort_by(|stem1, stem2| {
+            let g1 = &stem1.stem.group;
+            let g2 = &stem2.stem.group;
+
+            if g1.is_some() && g2.is_none() {
+                std::cmp::Ordering::Less
+            } else if g1.is_none() && g2.is_some() {
+                std::cmp::Ordering::Greater
+            } else {
+                g1.cmp(g2).reverse()
+            }
+        });
+
+        for stem in &mut self.stems {
+            stem.best_channel = stem
+                .audio
+                .as_ref()
+                .map(|audio| audio.best_channel_index(None))
+                .unwrap_or(0);
+        }
+    }
 }
 
 #[derive(Default, Debug)]
@@ -1244,22 +1267,8 @@ impl eframe::App for JonnahSlicer<'_> {
         }
 
         if self.refresh_project {
-            use std::cmp::Ordering::{Greater, Less};
-
             self.refresh_project = false;
-
-            self.project.stems.sort_by(|stem1, stem2| {
-                let g1 = &stem1.stem.group;
-                let g2 = &stem2.stem.group;
-
-                if g1.is_some() && g2.is_none() {
-                    Less
-                } else if g1.is_none() && g2.is_some() {
-                    Greater
-                } else {
-                    g1.cmp(g2).reverse()
-                }
-            });
+            self.project.refresh();
         }
 
         self.input_state = InputState::from_ctx(ctx);
