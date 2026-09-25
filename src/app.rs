@@ -22,7 +22,6 @@ struct InputState {
     pub esc_pressed: bool,
     pub number_pressed: Option<u8>,
     pub save_pressed: bool,
-    pub copy_pressed: bool,
     pub ref_paste_pressed: bool,
     pub paste_pressed: bool,
 }
@@ -76,8 +75,7 @@ impl InputState {
                     egui::Modifiers::COMMAND,
                     egui::Key::S,
                 )),
-                copy_pressed: i.consume_key(egui::Modifiers::CTRL, egui::Key::C),
-                paste_pressed, // i.consume_key(egui::Modifiers::CTRL, egui::Key::V),
+                paste_pressed,
                 ref_paste_pressed,
                 command_down,
             }
@@ -90,7 +88,7 @@ enum ProjectStatus {
     #[default]
     None,
     Loaded,
-    Failed(crate::Error),
+    Failed,
 }
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
@@ -542,7 +540,7 @@ impl JonnahSlicer<'_> {
                     ui.add(
                         egui::DragValue::new(&mut self.project.samples_fadeout)
                             .range(0..=20_000)
-                            .custom_formatter(|v, b| {
+                            .custom_formatter(|v, _| {
                                 let v = v as u64;
                                 format!("{v} samples")
                             }),
@@ -1275,27 +1273,35 @@ impl eframe::App for JonnahSlicer<'_> {
         if let Some(project_path) = &self.project_path {
             match &self.project_status {
                 ProjectStatus::None => {
-                    self.project = crate::project::load_project(project_path)
+                    match crate::project::load_project(project_path)
                         .and_then(|project| project.try_into())
-                        .unwrap_or_default();
+                    {
+                        Ok(project) => {
+                            self.project = project;
 
-                    if self.lock_all_on_startup {
-                        for stem in &mut self.project.stems {
-                            stem.locked = true;
+                            if self.lock_all_on_startup {
+                                for stem in &mut self.project.stems {
+                                    stem.locked = true;
+                                }
+                            }
+
+                            if self.audio_player.is_some() {
+                                let new_audio_player =
+                                    crate::audio_player::AudioPlayer::new(self.project.sample_rate)
+                                        .ok();
+                                self.audio_player = new_audio_player
+                                    .inspect(|player| player.set_volume(self.audio_volume));
+                            }
+
+                            self.project_status = ProjectStatus::Loaded;
+                        }
+                        Err(e) => {
+                            log::error!("failed to load project: {e}");
+                            self.project_status = ProjectStatus::Failed;
                         }
                     }
-
-                    if self.audio_player.is_some() {
-                        let new_audio_player =
-                            crate::audio_player::AudioPlayer::new(self.project.sample_rate).ok();
-                        self.audio_player =
-                            new_audio_player.inspect(|player| player.set_volume(self.audio_volume));
-                    }
-
-                    self.project_status = ProjectStatus::Loaded;
                 }
-                ProjectStatus::Failed(_error) => (),
-                ProjectStatus::Loaded => (),
+                ProjectStatus::Failed | ProjectStatus::Loaded => (),
             }
         }
         if self.input_state.save_pressed
