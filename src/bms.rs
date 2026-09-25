@@ -63,17 +63,23 @@ impl TryFrom<crate::project::Project> for bms_rs::bms::model::Bms {
             // base62 keysounds start at 01 not 00
             let obj_id = stem.starting_keysound.unwrap_or(1);
 
-            // TODO: Make this not fail?
-            let (file_stem, file_extension) = (
-                stem.audio_path
-                    .file_stem()
-                    .and_then(|v| v.to_str())
-                    .ok_or("no filename")?,
-                stem.audio_path
-                    .extension()
-                    .and_then(|v| v.to_str())
-                    .ok_or("no extension")?,
-            );
+            let (wav_file_stem, file_extension) = if let Some(group) = &stem.group {
+                (group.clone(), "wav".to_owned())
+            } else {
+                // TODO: Make this not fail?
+                let (file_stem, file_extension) = (
+                    stem.audio_path
+                        .file_stem()
+                        .and_then(|v| v.to_str())
+                        .ok_or("no filename")?,
+                    stem.audio_path
+                        .extension()
+                        .and_then(|v| v.to_str())
+                        .ok_or("no extension")?,
+                );
+
+                (file_stem.to_owned(), file_extension.to_owned())
+            };
 
             let mut obj_ids = vec![];
 
@@ -85,7 +91,7 @@ impl TryFrom<crate::project::Project> for bms_rs::bms::model::Bms {
                         encoded.insert(0, '0');
                     }
 
-                    let wav_path = format!("{file_stem}_{:03}.{file_extension}", obj_ids.len());
+                    let wav_path = format!("{wav_file_stem}_{:03}.{file_extension}", obj_ids.len());
 
                     let wav_obj_id = bms_rs::bms::command::ObjId::try_from(&encoded, true)?;
                     wav_files.insert(wav_obj_id, wav_path.into());

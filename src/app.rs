@@ -212,6 +212,29 @@ impl LiveProject {
             timing: timing.clone(),
         }
     }
+
+    pub fn groups(
+        &self,
+    ) -> (
+        std::collections::HashMap<&str, Vec<&LiveStem>>,
+        Vec<&LiveStem>,
+    ) {
+        let mut groups = std::collections::HashMap::new();
+        let mut strays = vec![];
+
+        for stem in &self.stems {
+            if let Some(group) = &stem.stem.group {
+                groups
+                    .entry(group.as_str())
+                    .or_insert_with(Vec::new)
+                    .push(stem);
+            } else {
+                strays.push(stem);
+            }
+        }
+
+        (groups, strays)
+    }
 }
 
 #[derive(Default, Debug)]
@@ -484,25 +507,66 @@ impl JonnahSlicer<'_> {
                 if ui.button("Export All Stems").clicked() {
                     let mut exported = None;
 
-                    for stem in self
-                        .project
-                        .stems
-                        .iter()
-                        .filter(|stem| !stem.stem.slices.0.is_empty())
-                    {
-                        let wrap_export_stem = || {
-                            let audio = stem.audio.as_ref().ok_or("no stem")?;
-                            let stem_prefix = stem
-                                .stem
-                                .audio_path
-                                .file_stem()
-                                .and_then(|v| v.to_str())
-                                .ok_or("bad stem prefix")?;
+                    let (groups, strays) = self.project.groups();
 
-                            let slices = &stem.stem.slices;
+                    for (group_name, group) in groups {
+                        let wrap_export_stem = || {
+                            let audios = group
+                                .iter()
+                                .map(|group| group.audio.as_ref().ok_or("no audio file available"))
+                                .collect::<Result<Vec<_>, _>>()?;
+
+                            let slices = group.iter().fold(
+                                crate::project::Slices::default(),
+                                |mut acc, live_stem| {
+                                    acc.union(&live_stem.stem.slices);
+                                    acc
+                                },
+                            );
+
+                            if slices.0.is_empty() {
+                                return Ok(());
+                            }
+
+                            let audios = group
+                                .iter()
+                                .map(|group| group.audio.as_ref().ok_or("no audio file available"))
+                                .collect::<Result<Vec<_>, _>>()?;
+
                             audio::export_stem(
                                 self.default_export_dir(),
-                                stem_prefix,
+                                group_name,
+                                &audios,
+                                &slices,
+                                &self.project.timing,
+                            )
+                        };
+
+                        if let Err(e) = wrap_export_stem() {
+                            log::error!("failed to export all stems: {e}");
+                            exported = None;
+                            break;
+                        }
+
+                        *exported.get_or_insert(0usize) += 1;
+                    }
+
+                    for stray in strays {
+                        if stray.stem.slices.0.is_empty() {
+                            continue;
+                        }
+
+                        let wrap_export_stem = || {
+                            let audio = stray.audio.as_ref().ok_or("no stem")?;
+                            let Some(export_prefix) = stray.stem.export_prefix() else {
+                                return Err("bad stem prefix")?;
+                            };
+
+                            let slices = &stray.stem.slices;
+
+                            audio::export_stem(
+                                self.default_export_dir(),
+                                export_prefix,
                                 &[audio],
                                 slices,
                                 &self.project.timing,
@@ -536,7 +600,7 @@ impl JonnahSlicer<'_> {
 
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
                 ui.label("Snapping: ");
-                const SNAPPINGS: [u16; 12] = [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 64, 128];
+                const SNAPPINGS: [u16; 14] = [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128];
 
                 for snap_v in SNAPPINGS {
                     let button = ui.button(format!("1/{snap_v}"));

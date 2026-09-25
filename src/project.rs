@@ -234,6 +234,15 @@ impl Stem {
     pub fn slices_mut(&mut self) -> &mut Slices {
         &mut self.slices
     }
+
+    pub fn export_prefix(&self) -> Option<&str> {
+        if let Some(group) = &self.group {
+            Some(group.as_str())
+        } else {
+            let v = self.audio_path.file_stem()?;
+            v.to_str()
+        }
+    }
 }
 
 #[derive(
