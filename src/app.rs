@@ -524,11 +524,12 @@ impl JonnahSlicer<'_> {
                 }
 
                 if ui.button("Generate BMS File").clicked() {
-                    if let Err(e) = export_bms_file(
-                        self.default_export_dir().join("out.bms"),
-                        &self.project.as_project(),
-                    ) {
+                    let export_filepath = self.default_export_dir().join("out.bms");
+
+                    if let Err(e) = export_bms_file(export_filepath, &self.project.as_project()) {
                         log::error!("failed to export BMS file: {e}");
+                    } else {
+                        log::info!("Exported bms file at {}", export_filepath.display());
                     }
                 }
             });

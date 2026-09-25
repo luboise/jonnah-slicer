@@ -49,7 +49,17 @@ impl TryFrom<crate::project::Project> for bms_rs::bms::model::Bms {
         let mut wav_files = std::collections::HashMap::new();
         let mut notes = bms_rs::bms::model::Notes::default();
 
+        let mut groups = std::collections::HashSet::new();
+
         for stem in stems {
+            if let Some(group) = &stem.group {
+                if groups.contains(group) {
+                    continue;
+                } else {
+                    groups.insert(group.clone());
+                }
+            }
+
             // base62 keysounds start at 01 not 00
             let obj_id = stem.starting_keysound.unwrap_or(1);
 
@@ -76,6 +86,7 @@ impl TryFrom<crate::project::Project> for bms_rs::bms::model::Bms {
                     }
 
                     let wav_path = format!("{file_stem}_{:03}.{file_extension}", obj_ids.len());
+
                     let wav_obj_id = bms_rs::bms::command::ObjId::try_from(&encoded, true)?;
                     wav_files.insert(wav_obj_id, wav_path.into());
 
