@@ -861,14 +861,6 @@ impl JonnahSlicer<'_> {
                     )
                     .unwrap();
 
-                    if stem.locked {
-                        ui.painter().rect_filled(
-                            rect,
-                            0,
-                            egui::Color32::from_rgba_premultiplied(0, 0, 0, 125),
-                        );
-                    }
-
                     if let Some((i, range)) = self.selection.get()
                         && i == stem_i
                     {
@@ -1532,6 +1524,13 @@ fn draw_stem(
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, background_color);
 
+    let text = live_stem
+        .stem
+        .audio_path
+        .file_name()
+        .and_then(|v| v.to_str())
+        .unwrap_or("error");
+
     const SLICE_COLOUR: egui::Color32 = egui::Color32::WHITE;
     let slice_stroke = egui::Stroke::new(3.0f32, SLICE_COLOUR);
     const REF_SLICE_COLOUR: egui::Color32 = egui::Color32::PURPLE;
@@ -1663,6 +1662,23 @@ fn draw_stem(
             slice_label,
             egui::FontId::default(),
             colour,
+        );
+    }
+
+    const TEXT_PADDING: f32 = 4.0;
+    painter.text(
+        egui::Pos2::new(rect.min.x + TEXT_PADDING, rect.min.y + TEXT_PADDING),
+        egui::Align2::LEFT_TOP,
+        text,
+        Default::default(),
+        egui::Color32::from_gray(220),
+    );
+
+    if live_stem.locked {
+        ui.painter().rect_filled(
+            rect,
+            0,
+            egui::Color32::from_rgba_premultiplied(0, 0, 0, 125),
         );
     }
 
