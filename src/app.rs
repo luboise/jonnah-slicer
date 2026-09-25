@@ -30,6 +30,27 @@ struct InputState {
 impl InputState {
     pub fn from_ctx(ctx: &egui::Context) -> Self {
         ctx.input_mut(|i| {
+            let mut paste_pressed = false;
+            let mut ref_paste_pressed = false;
+
+            let shift_pressed = i.modifiers.shift;
+
+            let command_down = i.modifiers.cmd_ctrl_matches(egui::Modifiers::COMMAND);
+
+            for event in &i.events {
+                #[expect(clippy::single_match)]
+                match event {
+                    egui::Event::Paste(_) => {
+                        if shift_pressed {
+                            ref_paste_pressed = true;
+                        } else {
+                            paste_pressed = true;
+                        }
+                    }
+                    _ => (),
+                }
+            }
+
             let first_number_pressed = (0..9).find_map(|num| {
                 i.consume_key(
                     egui::Modifiers::NONE,
@@ -56,10 +77,9 @@ impl InputState {
                     egui::Key::S,
                 )),
                 copy_pressed: i.consume_key(egui::Modifiers::CTRL, egui::Key::C),
-                ref_paste_pressed: i
-                    .consume_key(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, egui::Key::V),
-                paste_pressed: i.consume_key(egui::Modifiers::CTRL, egui::Key::V),
-                command_down: i.modifiers.cmd_ctrl_matches(egui::Modifiers::COMMAND),
+                paste_pressed, // i.consume_key(egui::Modifiers::CTRL, egui::Key::V),
+                ref_paste_pressed,
+                command_down,
             }
         })
     }
