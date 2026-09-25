@@ -86,6 +86,10 @@ impl Slices {
             .filter(|slice| matches!(slice.keysound_id, SliceKeysound::Auto))
     }
 
+    pub fn keysounds_required(&self) -> usize {
+        self.keysounds().count()
+    }
+
     pub fn keysound_index_of(&self, index: usize) -> Option<usize> {
         let slice = self.0.get(index)?;
 
@@ -347,7 +351,7 @@ pub fn calculate_initial_keysounds(
             stem.starting_keysound = Some(keysound);
         }
 
-        let num_keysounds: u64 = slices.0.len().try_into()?;
+        let num_keysounds: u64 = slices.keysounds_required().try_into()?;
         keysound = keysound
             .checked_add(num_keysounds + wiggle_room)
             .ok_or("slice count overflow")?;
