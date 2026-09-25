@@ -543,6 +543,48 @@ impl AudioFile {
             painter.line(points, stroke);
         }
     }
+
+    pub fn best_channel_index(&self, num_samples: Option<usize>) -> u16 {
+        if self.num_channels() <= 1 {
+            return 0;
+        }
+
+        let num_samples = num_samples.unwrap_or_else(|| self.num_samples_per_channel());
+
+        let bests = self
+            .samples
+            .chunks(self.num_channels() as usize)
+            .take(num_samples)
+            .fold(
+                vec![0.0; self.num_channels() as usize],
+                |mut acc, samples| {
+                    for i in 0..acc.len() {
+                        let sample = samples[i].abs();
+                        if sample > acc[i] {
+                            acc[i] = sample;
+                        }
+                    }
+
+                    acc
+                },
+            );
+
+        let (index, _) = bests
+            .into_iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| {
+                if a <= b {
+                    std::cmp::Ordering::Less
+                } else if a >= b {
+                    std::cmp::Ordering::Greater
+                } else {
+                    std::cmp::Ordering::Equal
+                }
+            })
+            .unwrap_or((0, 0.0));
+
+        index as u16
+    }
 }
 
 pub fn calculate_timepoints_distance(

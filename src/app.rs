@@ -161,6 +161,7 @@ struct LiveStem {
     stem: crate::project::Stem,
     audio: Option<crate::audio::AudioFile>,
     locked: bool,
+    best_channel: u16,
 }
 
 impl From<crate::project::Stem> for LiveStem {
@@ -169,6 +170,7 @@ impl From<crate::project::Stem> for LiveStem {
             stem,
             audio: None,
             locked: false,
+            best_channel: 0,
         }
     }
 }
@@ -538,11 +540,6 @@ impl JonnahSlicer<'_> {
 
                     for (group_name, group) in groups {
                         let wrap_export_stem = || {
-                            let audios = group
-                                .iter()
-                                .map(|group| group.audio.as_ref().ok_or("no audio file available"))
-                                .collect::<Result<Vec<_>, _>>()?;
-
                             let slices = group.iter().fold(
                                 crate::project::Slices::default(),
                                 |mut acc, live_stem| {
@@ -1342,6 +1339,7 @@ impl eframe::App for JonnahSlicer<'_> {
                         stem: crate::project::Stem::from_audio_path(file_path),
                         audio: None,
                         locked: false,
+                        best_channel: 0,
                     });
                 } else if extension == "mid" || extension == "midi" {
                     let Ok(bytes) = std::fs::read(&file_path) else {
@@ -1376,8 +1374,12 @@ impl eframe::App for JonnahSlicer<'_> {
             if st.audio.is_none()
                 && let Ok(wav) = wavers::Wav::from_path(&st.stem.audio_path)
             {
+                let audio = crate::audio::AudioFile::new(wav).expect("Bad wav");
+                let best_channel = audio.best_channel_index(None);
+
                 // TODO: FIX THIS
-                st.audio = Some(crate::audio::AudioFile::new(wav).expect("Bad wav"));
+                st.audio = Some(audio);
+                st.best_channel = best_channel;
             }
         });
 
@@ -1554,7 +1556,7 @@ fn draw_stem(
             egui::Stroke::new(1.5f32, egui::Color32::from_gray(190).linear_multiply(0.7));
 
         audio.draw_channel(
-            0,
+            live_stem.best_channel,
             Some(visual_density),
             starting_sample,
             num_samples,
