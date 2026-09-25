@@ -348,7 +348,7 @@ pub fn calculate_initial_keysounds(
         clippy::iter_over_hash_type,
         reason = "this won't ever run on a redundant system?"
     )]
-    for (_, stems) in sorted {
+    for (group_name, stems) in sorted {
         let slices = stems.iter().fold(Slices::default(), |mut acc, stem| {
             acc.union(&stem.slices);
             acc
@@ -375,7 +375,7 @@ pub fn calculate_initial_keysounds(
 
         stray.starting_keysound = Some(keysound);
 
-        let num_keysounds: u64 = stray.slices.0.len().try_into()?;
+        let num_keysounds: u64 = stray.slices.keysounds_required().try_into()?;
         keysound = keysound
             .checked_add(num_keysounds + wiggle_room)
             .ok_or("slice count overflow")?;
