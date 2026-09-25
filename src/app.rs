@@ -178,6 +178,7 @@ pub struct LiveProject {
     sample_rate: crate::project::SampleRate,
     stems: Vec<LiveStem>,
     timing: audio::Timing,
+    samples_fadeout: u64,
 }
 
 impl std::convert::TryFrom<crate::project::Project> for LiveProject {
@@ -188,12 +189,14 @@ impl std::convert::TryFrom<crate::project::Project> for LiveProject {
             sample_rate,
             stems,
             timing,
+            samples_fadeout,
         } = project;
 
         Ok(Self {
             sample_rate,
             stems: stems.into_iter().map(|v| v.into()).collect(),
             timing,
+            samples_fadeout,
         })
     }
 }
@@ -204,12 +207,14 @@ impl LiveProject {
             sample_rate,
             stems,
             timing,
+            samples_fadeout,
         } = self;
 
         crate::project::Project {
             sample_rate: *sample_rate,
             stems: stems.iter().map(|stem| stem.stem.clone()).collect(),
             timing: timing.clone(),
+            samples_fadeout: *samples_fadeout,
         }
     }
 
@@ -493,6 +498,8 @@ impl JonnahSlicer<'_> {
                         .text("Group Opacity"),
                 );
 
+                ui.separator();
+
                 if let Some(audio_player) = &mut self.audio_player {
                     if ui
                         .add(egui::Slider::new(&mut self.audio_volume, 0.0..=1.0).text("Volume"))
@@ -503,6 +510,26 @@ impl JonnahSlicer<'_> {
                 } else {
                     ui.colored_label(egui::Color32::RED, "audio player not initialised");
                 }
+
+                ui.separator();
+
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut self.project.samples_fadeout)
+                            .range(0..=20_000)
+                            .custom_formatter(|v, b| {
+                                let v = v as u64;
+                                format!("{v} samples")
+                            }),
+                    );
+
+                    let fadeout_ms = self.project.samples_fadeout.saturating_mul(1000) as f64
+                        / self.project.sample_rate.0 as f64;
+                    ui.label("Fadeout Length")
+                        .on_hover_text(format!("{fadeout_ms:.5}ms"));
+                });
+
+                ui.separator();
 
                 if ui.button("Export All Stems").clicked() {
                     let mut exported = None;
@@ -539,6 +566,7 @@ impl JonnahSlicer<'_> {
                                 &audios,
                                 &slices,
                                 &self.project.timing,
+                                self.project.samples_fadeout,
                             )
                         };
 
@@ -570,6 +598,7 @@ impl JonnahSlicer<'_> {
                                 &[audio],
                                 slices,
                                 &self.project.timing,
+                                self.project.samples_fadeout,
                             )
                         };
 
@@ -903,6 +932,7 @@ impl JonnahSlicer<'_> {
                         &audio,
                         &slices,
                         &self.project.timing,
+                        self.project.samples_fadeout,
                     ) {
                         log::error!("bad export: {e}");
                     }
@@ -929,6 +959,7 @@ impl JonnahSlicer<'_> {
                     audio,
                     &slices,
                     &self.project.timing,
+                    self.project.samples_fadeout,
                 ) {
                     log::error!("bad export: {e}");
                 }

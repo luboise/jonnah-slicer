@@ -285,6 +285,8 @@ pub struct Project {
     pub sample_rate: SampleRate,
     pub stems: Vec<Stem>,
     pub timing: crate::audio::Timing,
+    #[serde(default)]
+    pub samples_fadeout: u64,
 }
 
 pub fn normalise_project_path(path: impl AsRef<std::path::Path>) -> std::path::PathBuf {

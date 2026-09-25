@@ -21,6 +21,7 @@ impl TryFrom<crate::project::Project> for bms_rs::bms::model::Bms {
             sample_rate: _,
             stems,
             timing: bpm_changes,
+            samples_fadeout: _,
         } = value;
 
         let mut bpm_changes = bpm_changes.into_iter();

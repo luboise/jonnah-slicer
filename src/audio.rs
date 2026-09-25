@@ -575,6 +575,7 @@ pub fn export_stem(
     audio: &[&AudioFile],
     slices: &crate::project::Slices,
     timing: &Timing,
+    fadeout_length: u64,
 ) -> Result<(), crate::Error> {
     if slices.slices().is_empty() {
         return Err("zero slices provided for export".into());
@@ -660,6 +661,15 @@ pub fn export_stem(
             for (i, sample) in slice.iter().enumerate() {
                 buf[i] += *sample;
             }
+        }
+
+        // apply fadeout
+        let fadeout_length = (fadeout_length as usize).min(max_len);
+        let fadeout_start = max_len.saturating_sub(fadeout_length);
+
+        for i in 0..fadeout_length as usize {
+            let ratio = (fadeout_length as usize - 1 - i) as f32 / fadeout_length as f32;
+            buf[fadeout_start + i] *= ratio;
         }
 
         let file_name = format!("{stem_prefix}_{i:03}.wav");
