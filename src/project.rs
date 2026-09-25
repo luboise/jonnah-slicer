@@ -80,6 +80,17 @@ impl Slices {
             .find(|(_, slice)| slice.time_point == time)
     }
 
+    /// query for a timepoint, following all references back to the original slice
+    pub fn query_dereferenced(&self, ref_tp: crate::audio::TimePoint) -> Option<&Slice> {
+        let (_, mut slice) = self.query(ref_tp)?;
+
+        while let SliceKeysound::Reference(ref_tp) = slice.keysound_id {
+            slice = self.query(ref_tp)?.1;
+        }
+
+        Some(slice)
+    }
+
     pub fn keysounds(&self) -> impl Iterator<Item = &Slice> {
         self.0
             .iter()

@@ -1037,14 +1037,10 @@ impl JonnahSlicer<'_> {
                             continue;
                         };
 
-                        // prevent missing references when painting
-
-                        // TODO: Make this follow references if painting from a reference
-                        let Some((_, _paint_from)) = self
-                            .project
-                            .stems
-                            .get(*from_slice_i)
-                            .and_then(|live| live.stem.slices.query(*from_tp))
+                        let Some(paint_from) =
+                            self.project.stems.get(*from_slice_i).and_then(|live| {
+                                live.stem.slices.query_dereferenced(*from_tp).cloned()
+                            })
                         else {
                             log::warn!("stem {from_slice_i}: slice at tp {from_tp} does not exist");
                             continue;
@@ -1066,7 +1062,8 @@ impl JonnahSlicer<'_> {
                             continue;
                         }
 
-                        paint_to.keysound_id = crate::project::SliceKeysound::Reference(*from_tp);
+                        paint_to.keysound_id =
+                            crate::project::SliceKeysound::Reference(paint_from.time_point);
 
                         log::info!("stem {stem_i}: painted a slice at {}", paint_to.time_point);
                     }
