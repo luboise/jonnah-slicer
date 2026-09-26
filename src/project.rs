@@ -339,12 +339,14 @@ pub fn save_project(
 
     log::info!("saving project to {}", save_path.display());
     serde_json::to_writer_pretty(
-        std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(path)
-            .map_err(|e| e.to_string())?,
+        std::io::BufWriter::new(
+            std::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(path)
+                .map_err(|e| e.to_string())?,
+        ),
         &project,
     )
     .map_err(|e| e.to_string())?;
