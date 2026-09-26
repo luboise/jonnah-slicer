@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn mono_sample_index_test() -> Result<(), crate::Error> {
     let timing = Timing {
-        bpm_changes: vec![BPMChange {
+        bpm_changes: vec![BpmChange {
             time_point: TimePoint::from_submeasure(0, 0, 1),
             bpm: 160.0,
         }],
@@ -16,15 +16,6 @@ fn mono_sample_index_test() -> Result<(), crate::Error> {
     assert_eq!(66_150, tp.samples_from_start(44100, &timing)?);
 
     Ok(())
-}
-
-#[test]
-fn ratio_test() {
-    let start = TimePoint::new(7, 10);
-    let end = start + TimePoint::from_submeasure(4, 0, 1);
-
-    let res = start.ratio(&end, TimePoint::new(1, 2));
-    assert_eq!(res, TimePoint::new(27, 10));
 }
 
 #[test]
@@ -110,11 +101,11 @@ fn quantise_1_4() {
 fn get_timepoint() {
     let bpm_changes = Timing {
         bpm_changes: [
-            BPMChange {
+            BpmChange {
                 time_point: TimePoint::ZERO,
                 bpm: 120.0,
             },
-            BPMChange {
+            BpmChange {
                 time_point: TimePoint::from_measure(1),
                 bpm: 60.0,
             },
@@ -134,69 +125,4 @@ fn get_timepoint() {
         time_points[0].quantised(Snapping::Measure(1)),
         TimePoint::from_integer(3)
     );
-}
-
-fn loves_me_not_bpm_changes() -> [BPMChange; 15] {
-    [
-        BPMChange {
-            time_point: TimePoint::ZERO,
-            bpm: 210.0,
-        },
-        BPMChange {
-            time_point: TimePoint::from_measure(20),
-            bpm: 205.0,
-        },
-        BPMChange {
-            time_point: TimePoint::from_submeasure(20, 1, 2),
-            bpm: 200.0,
-        },
-        BPMChange {
-            time_point: TimePoint::from_measure(21),
-            bpm: 195.0,
-        },
-        BPMChange {
-            time_point: TimePoint::from_submeasure(21, 1, 2),
-            bpm: 190.0,
-        },
-        BPMChange {
-            time_point: TimePoint::from_measure(22),
-            bpm: 185.0,
-        },
-        BPMChange {
-            time_point: TimePoint::from_submeasure(22, 1, 2),
-            bpm: 180.0,
-        },
-        BPMChange {
-            time_point: TimePoint::from_measure(23),
-            bpm: 175.0,
-        },
-        BPMChange {
-            time_point: TimePoint::from_measure(24),
-            bpm: 180.0,
-        },
-        BPMChange {
-            time_point: TimePoint::from_submeasure(47, 1, 4),
-            bpm: 185.0,
-        },
-        BPMChange {
-            time_point: TimePoint::from_submeasure(47, 1, 2),
-            bpm: 190.0,
-        },
-        BPMChange {
-            time_point: TimePoint::from_submeasure(47, 3, 4),
-            bpm: 195.0,
-        },
-        BPMChange {
-            time_point: TimePoint::from_measure(48),
-            bpm: 200.0,
-        },
-        BPMChange {
-            time_point: TimePoint::from_measure(54),
-            bpm: 205.0,
-        },
-        BPMChange {
-            time_point: TimePoint::from_measure(56),
-            bpm: 210.0,
-        },
-    ]
 }

@@ -309,6 +309,8 @@ pub fn normalise_project_path(path: impl AsRef<std::path::Path>) -> std::path::P
     }
 }
 
+/// # Errors
+/// Will error if the file can't be read, or the project can't be parsed.
 pub fn load_project(path: impl AsRef<std::path::Path>) -> Result<Project, crate::Error> {
     let load_path = normalise_project_path(path.as_ref());
 
@@ -318,6 +320,10 @@ pub fn load_project(path: impl AsRef<std::path::Path>) -> Result<Project, crate:
     Ok(project)
 }
 
+/// # Errors
+/// Will error if
+/// - The project can't be opened for writing
+/// - The project's parent directory doesn't exist
 pub fn save_project(
     project: &Project,
     path: impl AsRef<std::path::Path>,
@@ -346,30 +352,40 @@ pub fn save_project(
     Ok(())
 }
 
+/// Calculate initial keysound indices for a stem of stems.
+///
+/// This is destructive, and will alter your
+/// project even if it fails.
+/// * `stems` - The stems to calculate keysounds for.
+/// * `wiggle_room` - The number of keysounds to leave as a gap between stems.
+///
+/// # Errors
+/// Returns an error if there are too many keysounds to pack.
 pub fn calculate_initial_keysounds(
     stems: Vec<&mut Stem>,
     wiggle_room: impl Into<u64>,
 ) -> Result<(), crate::Error> {
     let wiggle_room = wiggle_room.into();
 
-    let mut sorted = std::collections::HashMap::new();
+    let mut grouped = std::collections::HashMap::new();
 
-    let default_key = "".to_owned();
+    // fn to generate default key, in case we want to change it to a custom closure later
+    let default_key = String::new;
 
     for stem in stems {
-        let group = stem.group.clone().unwrap_or_else(|| default_key.clone());
-        sorted.entry(group).or_insert_with(Vec::new).push(stem);
+        let group = stem.group.clone().unwrap_or_else(default_key);
+        grouped.entry(group).or_insert_with(Vec::new).push(stem);
     }
 
-    let strays = sorted.remove(&default_key).unwrap_or_default();
+    let strays = grouped.remove(&default_key()).unwrap_or_default();
 
     let mut keysound = 1;
 
-    #[expect(
-        clippy::iter_over_hash_type,
-        reason = "this won't ever run on a redundant system?"
-    )]
-    for (group_name, stems) in sorted {
+    let mut entries = grouped.into_iter().collect::<Vec<_>>();
+    entries.sort_by_key(|(k, _v)| k.to_owned());
+
+    // need this to be deterministic, but we don't actually care about the group name
+    for (_, stems) in entries {
         let slices = stems.iter().fold(Slices::default(), |mut acc, stem| {
             acc.union(&stem.slices);
             acc

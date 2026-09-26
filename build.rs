@@ -1,3 +1,8 @@
+#[expect(
+    clippy::allow_attributes,
+    reason = "the expect won't trigger when we aren't on windows'"
+)]
+#[allow(clippy::unnecessary_wraps, reason = "we need this result on windows")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(target_os = "windows")]
     set_icon()?;

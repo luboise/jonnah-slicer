@@ -1,6 +1,7 @@
 use cpal::traits::{DeviceTrait as _, HostTrait as _, StreamTrait as _};
 
 pub struct AudioPlayer {
+    #[expect(unused, reason = "it feels like this should be kept?")]
     host: cpal::platform::Host,
     device: cpal::platform::Device,
     sample_rate: crate::project::SampleRate,
@@ -61,10 +62,10 @@ impl AudioPlayer {
             output_streams: vec![],
             config: config.clone(),
             audio_files: Default::default(),
-            volume: volume.clone(),
+            volume: std::sync::Arc::clone(&volume),
         };
 
-        let audio_files_clone = player.audio_files.clone();
+        let audio_files_clone = std::sync::Arc::clone(&player.audio_files);
 
         let stream = player
             .device
@@ -122,16 +123,9 @@ impl AudioPlayer {
         Ok(player)
     }
 
-    pub fn restart(&self) {
-        for output_stream in &self.output_streams {
-            output_stream.play().unwrap();
-        }
-    }
-
-    pub fn add_audio(&self, playback: AudioPlayback) {
+    pub fn add_audio(&self, playback: AudioPlayback) -> Result<(), crate::Error> {
         if playback.stream.channels.is_empty() {
-            log::error!("empty audio buffer submitted to output stream");
-            return;
+            return Err("empty audio buffer submitted to output stream".into());
         }
         if playback.cursor
             >= playback
@@ -147,12 +141,14 @@ impl AudioPlayer {
 
         self.audio_files
             .lock()
-            .expect("Failed to lock audio")
+            .expect("failed to lock audio")
             .push(playback);
 
         for stream in &self.output_streams {
-            stream.play().unwrap();
+            stream.play()?;
         }
+
+        Ok(())
     }
 
     pub fn stop(&self) {
@@ -163,6 +159,7 @@ impl AudioPlayer {
         audio_files.clear();
     }
 
+    #[expect(unused, reason = "TODO: validate volume against mutex")]
     pub fn volume(&self) -> f32 {
         *self.volume.read().expect("failed to get volume")
     }
@@ -171,6 +168,7 @@ impl AudioPlayer {
         *self.volume.write().expect("failed to write volume") = volume;
     }
 
+    #[expect(unused, reason = "TODO: validate sample rate against mutex")]
     pub fn sample_rate(&self) -> crate::project::SampleRate {
         self.sample_rate
     }
@@ -221,7 +219,7 @@ impl AudioPlayback {
             .stream
             .channels
             .iter()
-            .map(|channel| &channel[self.cursor..self.cursor + read_size])
+            .map(|channel| &channel[start..end])
             .collect();
 
         self.cursor = (self.cursor + read_size).min(self.length);
@@ -231,10 +229,6 @@ impl AudioPlayback {
     pub fn samples_remaining_per_channel(&self) -> usize {
         self.length - self.cursor
     }
-
-    pub fn total_samples_remaining(&self) -> usize {
-        self.stream.channels.len() * self.samples_remaining_per_channel()
-    }
 }
 
 pub struct AudioStream {
@@ -242,13 +236,7 @@ pub struct AudioStream {
 }
 
 impl From<Vec<Vec<f32>>> for AudioStream {
-    fn from(value: Vec<Vec<f32>>) -> Self {
-        Self { channels: value }
-    }
-}
-
-impl AudioStream {
-    pub fn new(channels: Vec<Vec<f32>>) -> Self {
+    fn from(channels: Vec<Vec<f32>>) -> Self {
         Self { channels }
     }
 }

@@ -202,7 +202,7 @@ impl std::convert::TryFrom<crate::project::Project> for LiveProject {
 }
 
 impl LiveProject {
-    pub fn as_project(&self) -> crate::project::Project {
+    fn as_project(&self) -> crate::project::Project {
         let Self {
             sample_rate,
             stems,
@@ -218,7 +218,7 @@ impl LiveProject {
         }
     }
 
-    pub fn groups(
+    fn groups(
         &self,
     ) -> (
         std::collections::HashMap<&str, Vec<&LiveStem>>,
@@ -241,7 +241,7 @@ impl LiveProject {
         (groups, strays)
     }
 
-    pub fn refresh(&mut self) {
+    fn refresh(&mut self) {
         self.stems.sort_by(|stem1, stem2| {
             let g1 = &stem1.stem.group;
             let g2 = &stem2.stem.group;
@@ -385,8 +385,7 @@ impl JonnahSlicer<'_> {
         app
     }
 
-    // TODO: Document errors that this function can return
-    pub fn save_to_disk(&mut self) -> Result<(), crate::Error> {
+    fn save_to_disk(&self) -> Result<(), crate::Error> {
         crate::project::save_project(
             &self.project.as_project(),
             self.project_path
@@ -396,14 +395,14 @@ impl JonnahSlicer<'_> {
         )
     }
 
-    pub fn default_export_dir(&self) -> std::path::PathBuf {
+    fn default_export_dir(&self) -> std::path::PathBuf {
         self.project_path
             .as_ref()
             .map(|v| v.join("out"))
             .unwrap_or_else(|| "./".into())
     }
 
-    pub fn draw_top_bar(&mut self, ui: &mut egui::Ui) {
+    fn draw_top_bar(&mut self, ui: &mut egui::Ui) {
         egui::Panel::top("top_panel").show_inside(ui, |ui|{
             ui.horizontal_top(|ui|{
                 ui.menu_button("File", |ui| {
@@ -448,11 +447,12 @@ impl JonnahSlicer<'_> {
         });
     }
 
-    pub fn draw_options(&mut self, ui: &mut egui::Ui) {
+    fn draw_options(&mut self, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
                 ui.heading(format!("JonnahSlicer v{}", env!("CARGO_PKG_VERSION")));
 
+                #[expect(clippy::unwrap_used, reason = "if this is poisoned we are cooked")]
                 let mut diagnostic = self.previous_diagnostic.lock().unwrap();
 
                 if diagnostic.as_ref().is_some_and(|(time, _)| {
@@ -559,7 +559,13 @@ impl JonnahSlicer<'_> {
 
                     let (groups, strays) = self.project.groups();
 
-                    for (group_name, group) in groups {
+                    let sorted = {
+                        let mut group_keys = groups.keys().clone().collect::<Vec<_>>();
+                        group_keys.sort();
+                        group_keys.into_iter().map(|key| (key, &groups[*key]))
+                    };
+
+                    for (group_name, group) in sorted {
                         let wrap_export_stem = || {
                             let slices = group.iter().fold(
                                 crate::project::Slices::default(),
@@ -700,8 +706,6 @@ impl JonnahSlicer<'_> {
                 i += 1.0;
             }
         }
-
-        let export_dir = self.default_export_dir();
 
         let mut stem_to_export = None;
         let mut stem_to_delete = None;
@@ -868,7 +872,7 @@ impl JonnahSlicer<'_> {
                         BASE_BACKGROUND_COLOR
                     };
 
-                    let (rect, event) = draw_stem(
+                    let (_rect, event) = draw_stem(
                         ui,
                         background_colour,
                         stem,
@@ -877,8 +881,10 @@ impl JonnahSlicer<'_> {
                         self.display_start,
                         end_time_point,
                     )
-                    .unwrap();
+                    .expect("failed to draw stem");
 
+                    // TODO: implement drawing the selection box over the stem
+                    /*
                     if let Some((i, range)) = self.selection.get()
                         && i == stem_i
                     {
@@ -900,6 +906,7 @@ impl JonnahSlicer<'_> {
                         )
                         .unwrap();
                     }
+                    */
 
                     if let Some(event) = event
                         && !(stem.locked && !matches!(event, StemEvent::Hovering(_)))
@@ -911,68 +918,9 @@ impl JonnahSlicer<'_> {
         }
 
         if let Some(stem_i) = stem_to_export {
-            let stem = self.project.stems.get(stem_i).expect("stem i not found");
-
-            if let Some(group) = &stem.stem.group {
-                // if in a group, find all stems in that group and export them together
-                let stems = self
-                    .project
-                    .stems
-                    .iter()
-                    .filter(|stem| stem.stem.group.as_ref().is_some_and(|g| g == group))
-                    .collect::<Vec<_>>();
-
-                if !stems.is_empty() {
-                    let stem_prefix = group;
-                    let audio = stems
-                        .iter()
-                        .filter_map(|stem| stem.audio.as_ref())
-                        .collect::<Vec<_>>();
-                    let slices =
-                        stems
-                            .iter()
-                            .fold(crate::project::Slices::default(), |mut acc, x| {
-                                acc.union(&x.stem.slices);
-                                acc
-                            });
-
-                    if let Err(e) = audio::export_stem(
-                        &export_dir,
-                        stem_prefix,
-                        &audio,
-                        &slices,
-                        &self.project.timing,
-                        self.project.samples_fadeout,
-                    ) {
-                        log::error!("bad export: {e}");
-                    }
-                }
-            } else {
-                // if not in a group, just get the details from the one stem
-
-                // TODO: Log "bad stem" if audio missing "bad stem"
-                // TODO: Log "bad audio" if audio path missing
-
-                let Some(audio) = stem.audio.as_ref() else {
-                    panic!("")
-                };
-                let slices = &stem.stem.slices;
-                let audio = &[audio];
-                let Some(stem_prefix) = stem.stem.audio_path.file_stem().and_then(|v| v.to_str())
-                else {
-                    panic!("")
-                };
-
-                if let Err(e) = audio::export_stem(
-                    &export_dir,
-                    stem_prefix,
-                    audio,
-                    &slices,
-                    &self.project.timing,
-                    self.project.samples_fadeout,
-                ) {
-                    log::error!("bad export: {e}");
-                }
+            let export_dir = self.default_export_dir();
+            if let Err(e) = self.export_stem(export_dir, stem_i) {
+                log::error!("failed to export stem: {e}");
             }
         }
 
@@ -983,6 +931,76 @@ impl JonnahSlicer<'_> {
 
             self.project.stems.remove(stem_i);
         }
+    }
+
+    fn export_stem(
+        &self,
+        export_dir: impl AsRef<std::path::Path>,
+        stem_i: usize,
+    ) -> Result<(), crate::Error> {
+        let stem = self
+            .project
+            .stems
+            .get(stem_i)
+            .ok_or_else(|| format!("stem[{stem_i}] not found"))?;
+
+        if let Some(group) = &stem.stem.group {
+            // if in a group, find all stems in that group and export them together
+            let stems = self
+                .project
+                .stems
+                .iter()
+                .filter(|stem| stem.stem.group.as_ref().is_some_and(|g| g == group))
+                .collect::<Vec<_>>();
+
+            if stems.is_empty() {
+                return Ok(());
+            }
+
+            let stem_prefix = group;
+            let audio = stems
+                .iter()
+                .filter_map(|stem| stem.audio.as_ref())
+                .collect::<Vec<_>>();
+            let slices = stems
+                .iter()
+                .fold(crate::project::Slices::default(), |mut acc, x| {
+                    acc.union(&x.stem.slices);
+                    acc
+                });
+
+            return audio::export_stem(
+                &export_dir,
+                stem_prefix,
+                &audio,
+                &slices,
+                &self.project.timing,
+                self.project.samples_fadeout,
+            );
+        }
+
+        // if not in a group, just get the details from the one stem
+
+        // TODO: Log "bad stem" if audio missing "bad stem"
+        // TODO: Log "bad audio" if audio path missing
+
+        let Some(audio) = stem.audio.as_ref() else {
+            return Err("audio missing".into());
+        };
+        let slices = &stem.stem.slices;
+        let audio = &[audio];
+        let Some(stem_prefix) = stem.stem.audio_path.file_stem().and_then(|v| v.to_str()) else {
+            panic!("")
+        };
+
+        audio::export_stem(
+            export_dir,
+            stem_prefix,
+            audio,
+            slices,
+            &self.project.timing,
+            self.project.samples_fadeout,
+        )
     }
 
     fn handle_stem_events(&mut self) {
@@ -1116,8 +1134,10 @@ impl JonnahSlicer<'_> {
                             )
                             .expect("failed to add audio");
 
-                            if let Some(audio_player) = &self.audio_player {
-                                audio_player.add_audio(playback);
+                            if let Some(audio_player) = &self.audio_player
+                                && let Err(e) = audio_player.add_audio(playback)
+                            {
+                                log::error!("failed to add audio: {e}");
                             }
                         } else {
                             log::error!("bad channel");
@@ -1323,9 +1343,11 @@ impl eframe::App for JonnahSlicer<'_> {
             ctx.input(|i| (i.raw.dropped_files.clone(), i.raw.hovered_files.clone()));
 
         if !hovered.is_empty() {
-            egui::Panel::left("File Hover Preview").show(ctx, |ui| {
+            #[expect(deprecated, reason = "this doesn't work atm, no point refactoring")]
+            egui::Panel::left("File Hover Preview").show(ctx, |_| {
                 if !hovered.is_empty() {
                     for path in hovered.into_iter().filter_map(|file| file.path) {
+                        #[expect(unused_variables, reason = "implement after fixing midi import")]
                         let hovered_file = path.display().to_string();
                     }
                 }

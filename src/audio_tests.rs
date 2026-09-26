@@ -1,5 +1,3 @@
-use crate::project::Slice;
-
 use super::*;
 
 #[test]
@@ -10,7 +8,7 @@ fn num_samples() -> Result<(), crate::Error> {
         crate::project::SampleRate(48000),
         1,
         &Timing {
-            bpm_changes: [BPMChange {
+            bpm_changes: [BpmChange {
                 time_point: TimePoint::ZERO,
                 bpm: 180.0,
             }]
@@ -37,11 +35,11 @@ fn half_bpm_120_to_60() -> Result<(), crate::Error> {
         NUM_CHANNELS,
         &Timing {
             bpm_changes: [
-                BPMChange {
+                BpmChange {
                     time_point: TimePoint::ZERO,
                     bpm: 120.0,
                 },
-                BPMChange {
+                BpmChange {
                     time_point: TimePoint::from_integer(4),
                     bpm: 60.0,
                 },
@@ -105,7 +103,6 @@ fn cuts() -> Result<(), crate::Error> {
 
     Ok(())
 }
-*/
 
 fn test_time_points() -> [Slice; 38] {
     [
@@ -154,3 +151,4 @@ fn test_time_points() -> [Slice; 38] {
     ]
     .map(|tp| Slice::new(tp))
 }
+*/

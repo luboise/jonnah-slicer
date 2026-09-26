@@ -10,10 +10,6 @@ default-run = "jonnah_slicer"
 name = "jonnah_slicer"
 path = "src/bin/main.rs"
 
-[[bin]]
-name = "bms_test"
-path = "src/bin/bms_test.rs"
-
 [package.metadata.docs.rs]
 all-features = true
 targets = ["x86_64-unknown-linux-gnu", "wasm32-unknown-unknown"]
@@ -173,7 +169,7 @@ iter_not_returning_iterator = "warn"
 iter_on_empty_collections = "warn"
 iter_on_single_items = "warn"
 iter_over_hash_type = "warn"
-iter_without_into_iter = "warn"
+iter_without_into_iter = "allow"
 large_digit_groups = "warn"
 large_futures = "warn"
 large_include_file = "warn"
@@ -258,7 +254,7 @@ suspicious_command_arg_space = "warn"
 suspicious_xor_used_as_pow = "warn"
 todo = "warn"
 too_long_first_doc_paragraph = "warn"
-too_many_lines = "warn"
+too_many_lines = "allow"
 trailing_empty_array = "warn"
 trait_duplication_in_bounds = "warn"
 transmute_ptr_to_ptr = "warn"

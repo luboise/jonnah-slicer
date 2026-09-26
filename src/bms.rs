@@ -1,10 +1,10 @@
 use crate::audio::RatioExt as _;
 
-impl TryFrom<crate::audio::BPMChange> for bms_rs::bms::model::obj::BpmChangeObj {
+impl TryFrom<crate::audio::BpmChange> for bms_rs::bms::model::obj::BpmChangeObj {
     type Error = crate::Error;
 
-    fn try_from(value: crate::audio::BPMChange) -> Result<Self, Self::Error> {
-        let crate::audio::BPMChange { time_point, bpm } = value;
+    fn try_from(value: crate::audio::BpmChange) -> Result<Self, Self::Error> {
+        let crate::audio::BpmChange { time_point, bpm } = value;
 
         Ok(Self {
             time: time_point.to_objtime()?,

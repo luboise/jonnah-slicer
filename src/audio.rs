@@ -80,15 +80,12 @@ pub trait RatioExt: Sized {
     fn from_time(time_microseconds: u64, bpm_changes: &Timing) -> Result<Self, crate::Error>;
 
     fn clamped_to_zero(self) -> Self;
-    fn ratio(&self, other: &Self, ratio: impl Into<Self>) -> Self;
 
     fn quantise(&mut self, snapping: Snapping);
     fn quantised(mut self, snapping: Snapping) -> Self {
         self.quantise(snapping);
         self
     }
-
-    fn ratio_at_t(&self, end: &Self, t: &Self) -> Self;
 
     fn seconds_from_start(&self, bpm_changes: &Timing) -> Result<f64, crate::Error>;
     fn samples_from_start(
@@ -99,7 +96,6 @@ pub trait RatioExt: Sized {
 
     fn abs(&self) -> Self;
 
-    fn to_f32(&self) -> f32;
     fn to_f64(&self) -> f64;
     fn to_objtime(&self) -> Result<bms_rs::bms::command::time::ObjTime, crate::Error>;
 }
@@ -123,12 +119,6 @@ impl RatioExt for TimePoint {
         if self <= Self::ZERO { Self::ZERO } else { self }
     }
 
-    fn ratio(&self, other: &Self, ratio: impl Into<Self>) -> Self {
-        let diff = other - self;
-
-        Self::from(self + ratio.into() * (diff))
-    }
-
     fn quantise(&mut self, snapping: Snapping) {
         let denom: i64 = match snapping {
             Snapping::Measure(v) => v.into(),
@@ -136,13 +126,6 @@ impl RatioExt for TimePoint {
         };
 
         *self = (*self * denom).round() / denom;
-    }
-
-    fn ratio_at_t(&self, end: &Self, t: &Self) -> Self {
-        let start = self;
-        let end = end;
-
-        (t - start) / (end - start)
     }
 
     fn seconds_from_start(&self, bpm_changes: &Timing) -> Result<f64, crate::Error> {
@@ -160,17 +143,9 @@ impl RatioExt for TimePoint {
         Ok((seconds * channel_sample_rate as f64) as usize)
     }
 
-    fn to_f32(&self) -> f32 {
-        *self.numer() as f32 / *self.denom() as f32
-    }
-
     fn to_f64(&self) -> f64 {
         *self.numer() as f64 / *self.denom() as f64
     }
-
-    // pub fn ceil(&self) -> i64 {
-    //     self.0.ceil().to_integer()
-    // }
 
     fn to_objtime(&self) -> Result<bms_rs::bms::command::time::ObjTime, crate::Error> {
         let measure = self.floor().to_integer();
@@ -196,15 +171,15 @@ mod time_point_tests;
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 #[serde(transparent)]
 pub struct Timing {
-    bpm_changes: Vec<BPMChange>,
+    bpm_changes: Vec<BpmChange>,
 }
 
-pub type BPM = f64;
+pub type Bpm = f64;
 
 impl Default for Timing {
     fn default() -> Self {
         Self {
-            bpm_changes: vec![BPMChange {
+            bpm_changes: vec![BpmChange {
                 time_point: Default::default(),
                 bpm: 120.0,
             }],
@@ -213,44 +188,42 @@ impl Default for Timing {
 }
 
 impl Timing {
-    pub fn base_bpm(&self) -> BPM {
+    pub fn base_bpm(&self) -> Bpm {
         self.bpm_changes[0].bpm
     }
 
-    pub fn bpm_changes(&self) -> &[BPMChange] {
+    pub fn bpm_changes(&self) -> &[BpmChange] {
         &self.bpm_changes
     }
 
-    pub fn iter(&self) -> std::slice::Iter<'_, BPMChange> {
+    pub fn iter(&self) -> std::slice::Iter<'_, BpmChange> {
         self.bpm_changes.iter()
     }
 
-    pub fn first(&self) -> Option<&BPMChange> {
+    pub fn first(&self) -> Option<&BpmChange> {
         self.bpm_changes.first()
     }
 
-    pub fn last(&self) -> Option<&BPMChange> {
+    pub fn last(&self) -> Option<&BpmChange> {
         self.bpm_changes.last()
     }
 
-    pub fn get_bpm_change_unchecked(&self, i: usize) -> BPMChange {
-        self.bpm_changes[i]
-    }
-
     /// Get the position of one (or many) time points in a given set of timings, as a duration from the start of the song
+    /// TODO: Make this return a result instead of panicking
     pub fn times_of(&self, time_points: &[TimePoint]) -> Vec<std::time::Duration> {
         if time_points.is_empty() {
             return vec![];
         }
 
-        let mut acc: BPM = 0.0;
+        let mut acc: Bpm = 0.0;
 
         let mut durations = vec![None; time_points.len()];
 
         'outer: for [l, r] in self.bpm_changes.array_windows().chain(
             [
-                self.bpm_changes.last().unwrap().clone(),
-                BPMChange {
+                #[expect(clippy::unwrap_used, reason = "there can never be zero bpm changes")]
+                *self.last().unwrap(),
+                BpmChange {
                     time_point: TimePoint::from_integer(i64::MAX),
                     bpm: 120.0,
                 },
@@ -269,7 +242,7 @@ impl Timing {
                 }
 
                 if l.time_point <= tp && tp <= r.time_point {
-                    let num_beats = (tp - l.time_point) * BEATS_PER_MEASURE as i64;
+                    let num_beats = (tp - l.time_point) * (BEATS_PER_MEASURE.cast_signed() as i64);
                     let beat_length = 60.0 / l.bpm;
 
                     let diff_dur = num_beats.to_f64() * beat_length;
@@ -286,11 +259,10 @@ impl Timing {
             acc += beat_length * (r.time_point - l.time_point).to_f64() * BEATS_PER_MEASURE as f64;
         }
 
-        assert!(
-            durations.iter().all(Option::is_some),
-            "some durations weren't findable"
-        );
-        durations.into_iter().map(|v| v.unwrap()).collect()
+        durations
+            .into_iter()
+            .map(|v| v.expect("duration was not findable"))
+            .collect()
     }
 
     pub fn get_timepoints(&self, times_microseconds: &[u64]) -> Vec<TimePoint> {
@@ -305,8 +277,11 @@ impl Timing {
 
         'outer: for [l, r] in self.bpm_changes.array_windows().chain(
             [
-                self.bpm_changes.last().copied().unwrap(),
-                BPMChange {
+                self.bpm_changes
+                    .last()
+                    .copied()
+                    .expect("bpm_changes can't be empty"),
+                BpmChange {
                     time_point: TimePoint::from_integer(i64::MAX),
                     bpm: 120.0,
                 },
@@ -321,23 +296,23 @@ impl Timing {
                 std::time::Duration::from_secs_f64(diff_beats * (60.0 / l.bpm))
             };
 
-            for (i, time_μs) in times_microseconds.iter_mut().enumerate() {
+            for (i, micros) in times_microseconds.iter_mut().enumerate() {
                 // skip ones we've already found
                 if time_points[i].is_some() {
                     continue;
                 }
 
-                let time_ms_duration = std::time::Duration::from_micros(*time_μs);
+                let time_ms_duration = std::time::Duration::from_micros(*micros);
                 // skip ones which aren't due yet
                 if time_ms_duration > segment_duration {
-                    *time_μs -= segment_duration.as_micros() as u64;
+                    *micros -= segment_duration.as_micros() as u64;
                     continue;
                 }
 
-                let diff_μs = *time_μs as f64;
+                let diff_micros = *micros as f64;
                 let beat_length = 60_000_000.0 / l.bpm;
 
-                let mut num_beats = diff_μs / beat_length;
+                let mut num_beats = diff_micros / beat_length;
 
                 let mut num_measures = 0;
                 while num_beats >= BEATS_PER_MEASURE as f64 {
@@ -363,7 +338,8 @@ impl Timing {
             // This diff duration will fail on unchecked mul if not careful
             let diff_duration = {
                 let diff_measures = r.time_point - l.time_point;
-                let diff_beats = diff_measures * TimePoint::from_integer(BEATS_PER_MEASURE as i64);
+                let diff_beats =
+                    diff_measures * TimePoint::from_integer(BEATS_PER_MEASURE.cast_signed() as i64);
 
                 let beat_length = 60.000 / l.bpm;
 
@@ -377,7 +353,7 @@ impl Timing {
 }
 
 impl IntoIterator for Timing {
-    type Item = BPMChange;
+    type Item = BpmChange;
     type IntoIter = std::vec::IntoIter<Self::Item>;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -386,14 +362,13 @@ impl IntoIterator for Timing {
 }
 
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
-pub struct BPMChange {
+pub struct BpmChange {
     pub time_point: TimePoint,
-    pub bpm: BPM,
+    pub bpm: Bpm,
 }
 
 #[derive(Debug)]
 pub struct AudioFile {
-    sample_rate: crate::project::SampleRate,
     wav: wavers::Wav<f32>,
     samples: wavers::Samples<f32>,
 }
@@ -401,11 +376,7 @@ pub struct AudioFile {
 impl AudioFile {
     pub fn new(mut wav: wavers::Wav<f32>) -> Result<Self, wavers::WaversError> {
         let samples = wav.read()?;
-        Ok(Self {
-            sample_rate: crate::project::SampleRate(wav.sample_rate()),
-            wav,
-            samples,
-        })
+        Ok(Self { wav, samples })
     }
 
     pub fn sample_rate(&self) -> i32 {
@@ -422,10 +393,6 @@ impl AudioFile {
 
     pub fn num_samples_per_channel(&self) -> usize {
         self.num_samples() / self.num_channels() as usize
-    }
-
-    pub fn samples(&self) -> &[f32] {
-        &self.samples
     }
 
     pub fn channels(&self) -> Vec<Vec<f32>> {
@@ -496,6 +463,10 @@ impl AudioFile {
         Ok(cuts)
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "this is a one-off function, no need to split the args into a struct"
+    )]
     pub fn draw_channel(
         &self,
         channel_index: u16,
@@ -512,7 +483,7 @@ impl AudioFile {
             .unwrap_or_else(|| self.samples.len());
 
         let samples = (0..num_points).map(|i| {
-            let ratio = (i as BPM) / ((num_points - 1) as BPM);
+            let ratio = (i as Bpm) / ((num_points - 1) as Bpm);
 
             let index = (ratio * (num_samples as f64)) as usize + starting_sample;
 
@@ -592,23 +563,25 @@ pub fn calculate_timepoints_distance(
     end: impl Into<TimePoint>,
     timing: &Timing,
 ) -> Result<f64, crate::Error> {
-    let (start, end) = {
+    let bounds = {
         let start = start.into();
         let end = end.into();
 
         if start < end {
-            (start, end)
+            [start, end]
         } else {
-            (end, start)
+            [end, start]
         }
     };
 
-    let times = timing.times_of(&[start, end]);
+    let times = timing.times_of(&bounds);
 
     let l = times[0];
     let r = times[1];
 
-    Ok((r - l).as_secs_f64())
+    let distance = r.checked_sub(l).ok_or("bad duration sub")?;
+
+    Ok(distance.as_secs_f64())
 }
 
 pub fn export_stem(
@@ -709,8 +682,8 @@ pub fn export_stem(
         let fadeout_length = (fadeout_length as usize).min(max_len);
         let fadeout_start = max_len.saturating_sub(fadeout_length);
 
-        for i in 0..fadeout_length as usize {
-            let ratio = (fadeout_length as usize - 1 - i) as f32 / fadeout_length as f32;
+        for i in 0..fadeout_length {
+            let ratio = (fadeout_length - 1 - i) as f32 / fadeout_length as f32;
             buf[fadeout_start + i] *= ratio;
         }
 
