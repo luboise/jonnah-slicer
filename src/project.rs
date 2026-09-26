@@ -82,10 +82,20 @@ impl Slices {
 
     /// query for a timepoint, following all references back to the original slice
     pub fn query_dereferenced(&self, ref_tp: crate::audio::TimePoint) -> Option<&Slice> {
+        let mut depth = 0;
+
         let (_, mut slice) = self.query(ref_tp)?;
 
-        while let SliceKeysound::Reference(ref_tp) = slice.keysound_id {
+        while depth < 5
+            && let SliceKeysound::Reference(ref_tp) = slice.keysound_id
+        {
             slice = self.query(ref_tp)?.1;
+            depth += 1;
+        }
+
+        if depth >= 5 {
+            log::error!("infinite loop de-referencing time point {ref_tp}");
+            return None;
         }
 
         Some(slice)
