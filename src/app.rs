@@ -480,7 +480,7 @@ impl JonnahSlicer<'_> {
                 }
 
                 // The central panel the region left after adding TopPanel's and SidePanel's
-                ui.add(egui::Slider::new(&mut self.zoom_level, 0.0..=8.0).text("Zoom"));
+                ui.add(egui::Slider::new(&mut self.zoom_level, 0.0..=16.0).text("Zoom"));
                 if ui
                     .add(
                         egui::Slider::new(
