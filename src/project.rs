@@ -208,7 +208,7 @@ impl Slices {
 
 #[derive(serde::Serialize, serde::Deserialize, Default, Debug, Clone, Copy)]
 pub enum StemType {
-    Note,
+    Note(usize),
     #[default]
     BGM,
 }

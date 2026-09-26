@@ -755,26 +755,42 @@ impl JonnahSlicer<'_> {
                                 }
                             });
 
-                            {
-                                use crate::project::StemType;
+                            match stem.stem.ty {
+                                crate::project::StemType::Note(mut channel) => {
+                                    use crate::project::StemType;
 
-                                let button_text = match stem.stem.ty {
-                                    StemType::Note => "Note",
-                                    StemType::BGM => "BGM",
-                                };
+                                    let button = egui::Button::new("Note").fill(
+                                        egui::Color32::BLUE
+                                            .lerp_to_gamma(egui::Color32::WHITE, 0.3),
+                                    );
 
-                                let button_colour = match stem.stem.ty {
-                                    StemType::Note => egui::Color32::BLUE,
-                                    StemType::BGM => egui::Color32::RED,
+                                    ui.horizontal(|ui| {
+                                        if ui.add(button).clicked() {
+                                            stem.stem.ty = StemType::BGM;
+                                        }
+
+                                        let drag = egui::DragValue::new(&mut channel)
+                                            .range(0..=crate::bms::CHANNEL_MAP.len() - 1)
+                                            .custom_formatter(|v, _| {
+                                                let s = crate::bms::CHANNEL_NAMES
+                                                    .get(v as usize)
+                                                    .unwrap_or(&"ERR");
+                                                String::from(*s)
+                                            });
+                                        if ui.add(drag).changed() {
+                                            stem.stem.ty = StemType::Note(channel);
+                                        }
+                                    });
                                 }
-                                .lerp_to_gamma(egui::Color32::WHITE, 0.3);
+                                crate::project::StemType::BGM => {
+                                    use crate::project::StemType;
 
-                                let button = egui::Button::new(button_text).fill(button_colour);
+                                    let button = egui::Button::new("BGM").fill(
+                                        egui::Color32::RED.lerp_to_gamma(egui::Color32::WHITE, 0.3),
+                                    );
 
-                                if ui.add(button).clicked() {
-                                    stem.stem.ty = match stem.stem.ty {
-                                        StemType::Note => StemType::BGM,
-                                        StemType::BGM => StemType::Note,
+                                    if ui.add(button).clicked() {
+                                        stem.stem.ty = StemType::Note(0);
                                     }
                                 }
                             }

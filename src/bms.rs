@@ -13,6 +13,16 @@ impl TryFrom<crate::audio::BpmChange> for bms_rs::bms::model::obj::BpmChangeObj 
     }
 }
 
+pub const CHANNEL_MAP: [&[u8; 2]; 16] = [
+    b"16", b"11", b"12", b"13", b"14", b"15", b"18", b"19", // left side
+    b"21", b"22", b"23", b"24", b"25", b"28", b"29", b"26", // right side
+];
+
+pub const CHANNEL_NAMES: [&str; 16] = [
+    "1-S", "1-1", "1-2", "1-3", "1-4", "1-5", "1-6", "1-7", // left side
+    "2-1", "2-2", "2-3", "2-4", "2-5", "2-6", "2-7", "2-S", // right side
+];
+
 impl TryFrom<crate::project::Project> for bms_rs::bms::model::Bms {
     type Error = crate::Error;
 
@@ -44,13 +54,6 @@ impl TryFrom<crate::project::Project> for bms_rs::bms::model::Bms {
                 &bms_rs::bms::parse::prompt::AlwaysUseNewer,
             )?;
         }
-
-        const CHANNEL_MAP: [&[u8; 2]; 16] = [
-            b"11", b"12", b"13", b"14", b"15", b"16", b"18", b"19", // left side
-            b"21", b"22", b"23", b"24", b"25", b"26", b"28", b"29", // right side
-        ];
-
-        let mut notes_map = std::collections::HashMap::new();
 
         let mut wav_files = std::collections::HashMap::new();
         let mut notes = bms_rs::bms::model::Notes::default();
@@ -113,36 +116,18 @@ impl TryFrom<crate::project::Project> for bms_rs::bms::model::Bms {
                     .ok_or_else(|| format!("slice {slice_i} points to non-existant keysound"))?;
 
                 match stem.ty {
-                    crate::project::StemType::Note => {
-                        let can_place_note = {
-                            let x = notes_map.entry(slice.time_point).or_insert(0usize);
-                            if *x < CHANNEL_MAP.len() {
-                                let a = Some(*x);
-                                *x += 1;
+                    crate::project::StemType::Note(note_i) => {
+                        let mapped = CHANNEL_MAP.get(note_i).unwrap_or(&CHANNEL_MAP[0]);
 
-                                a
-                            } else {
-                                None
-                            }
-                        };
+                        let note_channel_id = (**mapped)
+                            .try_into()
+                            .map_err(|e| format!("bad input: {e:#?}"))?;
 
-                        if let Some(map_index) = can_place_note {
-                            let note_channel_id = CHANNEL_MAP[map_index]
-                                .to_owned()
-                                .try_into()
-                                .map_err(|e| format!("bad input: {e:#?}"))?;
-
-                            notes.push_note(bms_rs::bms::model::obj::WavObj {
-                                offset: slice.time_point.to_objtime()?,
-                                channel_id: note_channel_id,
-                                wav_id: wav_obj_id,
-                            });
-                        } else {
-                            notes.push_bgm::<bms_rs::bms::command::channel::mapper::KeyLayoutBeat>(
-                                slice.time_point.to_objtime()?,
-                                wav_obj_id,
-                            );
-                        }
+                        notes.push_note(bms_rs::bms::model::obj::WavObj {
+                            offset: slice.time_point.to_objtime()?,
+                            channel_id: note_channel_id,
+                            wav_id: wav_obj_id,
+                        });
                     }
                     crate::project::StemType::BGM => {
                         notes.push_bgm::<bms_rs::bms::command::channel::mapper::KeyLayoutBeat>(
