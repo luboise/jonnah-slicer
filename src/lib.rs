@@ -5,6 +5,10 @@ mod bms;
 pub mod logging;
 pub mod project;
 
+pub mod draw;
+
+pub mod arranger;
+
 pub use app::JonnahSlicer;
 
 use audio::RatioExt as _;

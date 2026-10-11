@@ -1,4 +1,8 @@
-use crate::audio::{self, calculate_num_samples};
+use crate::{
+    arranger::draw_notes_in_column,
+    audio::{self, calculate_num_samples},
+};
+
 use audio::RatioExt as _;
 use egui::{Button, emath::Numeric as _};
 use std::hash::{Hash as _, Hasher as _};
@@ -975,7 +979,93 @@ impl JonnahSlicer<'_> {
         }
     }
 
-    fn draw_arranger_ui(&self, _ui: &mut egui::Ui) {}
+    fn draw_arranger_ui(&self, ui: &mut egui::Ui) {
+        use crate::arranger;
+
+        const PLAY_COLS: [(egui::Color32, usize); 8] = [
+            (egui::Color32::RED, 22),
+            (egui::Color32::WHITE, 10),
+            (egui::Color32::BLUE, 9),
+            (egui::Color32::WHITE, 10),
+            (egui::Color32::BLUE, 9),
+            (egui::Color32::WHITE, 10),
+            (egui::Color32::BLUE, 9),
+            (egui::Color32::WHITE, 10),
+        ];
+
+        const GREEN_COLS: [&str; 3] = ["BGA", "LAYER", "MISS"];
+
+        const COLUMN_SCALE: usize = 3;
+
+        ui.spacing_mut().item_spacing.x = 1.0;
+
+        let tp_range = audio::TimePoint::ZERO..audio::TimePoint::from_measure(1);
+
+        let dummy_notes: [arranger::Note; 8] = std::array::from_fn(|i| arranger::Note {
+            tp: audio::TimePoint::from_submeasure(0, i.cast_signed() as i64, 8),
+        });
+
+        let col_height = ui.available_height() * 0.9;
+
+        {
+            // fill bg with colour
+            let keys_bg_rect = {
+                let sum_width = PLAY_COLS
+                    .map(|(_, w)| w * COLUMN_SCALE)
+                    .into_iter()
+                    .sum::<usize>() as f32;
+
+                egui::Rect::from_min_size(ui.cursor().min, egui::Vec2::new(sum_width, col_height))
+            };
+
+            ui.painter()
+                .rect_filled(keys_bg_rect, 0, egui::Color32::from_gray(83));
+        }
+
+        ui.horizontal(|ui| {
+            // draw dummy columns
+            for (i, (note_colour, col_width)) in PLAY_COLS.into_iter().enumerate() {
+                let col_width = col_width as f32 * COLUMN_SCALE as f32;
+                let col = arranger::draw_column(
+                    ui,
+                    col_width,
+                    col_height,
+                    Some(arranger::column_colour(i)),
+                );
+
+                arranger::draw_notes_in_column(
+                    ui,
+                    col,
+                    tp_range.clone(),
+                    note_colour,
+                    &dummy_notes[i..i + 1],
+                );
+            }
+
+            // draw stems
+            for stem in &self.project.stems {
+                if stem.stem.slices.0.is_empty() {
+                    continue;
+                }
+
+                let col = arranger::draw_column(
+                    ui,
+                    20.0 * COLUMN_SCALE as f32,
+                    col_height,
+                    // TODO: Get colour from stem/stem group instead
+                    Some(egui::Color32::from_gray(150)),
+                );
+
+                draw_notes_in_column(
+                    ui,
+                    col,
+                    tp_range.clone(),
+                    egui::Color32::DARK_RED,
+                    &dummy_notes,
+                );
+            }
+        });
+    }
 
     fn export_stem(
         &self,
@@ -1513,16 +1603,22 @@ impl eframe::App for JonnahSlicer<'_> {
 
             ui.separator();
 
-            egui::ScrollArea::vertical()
-                .scroll_source(if self.input_state.shift_pressed {
-                    egui::scroll_area::ScrollSource::NONE
-                } else {
-                    egui::scroll_area::ScrollSource::MOUSE_WHEEL
-                })
-                .show(ui, |ui| match self.mode {
-                    Mode::Slicing => self.draw_slicer_ui(ui),
-                    Mode::Arranging => self.draw_arranger_ui(ui),
-                });
+            match self.mode {
+                Mode::Slicing => {
+                    let scroll_source = if self.input_state.shift_pressed {
+                        egui::scroll_area::ScrollSource::NONE
+                    } else {
+                        egui::scroll_area::ScrollSource::MOUSE_WHEEL
+                    };
+
+                    egui::ScrollArea::vertical()
+                        .scroll_source(scroll_source)
+                        .show(ui, |ui| self.draw_slicer_ui(ui));
+                }
+                Mode::Arranging => {
+                    self.draw_arranger_ui(ui);
+                }
+            }
 
             let rect = ui.available_rect_before_wrap();
 
