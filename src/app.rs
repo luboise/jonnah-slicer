@@ -91,6 +91,12 @@ enum ProjectStatus {
     Failed,
 }
 
+#[derive(serde::Deserialize, serde::Serialize)]
+pub enum Mode {
+    Slicing,
+    Arranging,
+}
+
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
@@ -111,6 +117,8 @@ pub struct JonnahSlicer<'a> {
     group_colour_opacity: f32,
 
     lock_all_on_startup: bool,
+
+    mode: Mode,
 
     #[serde(skip)]
     quit_application: bool,
@@ -350,6 +358,7 @@ impl Default for JonnahSlicer<'_> {
             stem_events: vec![],
             painting_keysound: None,
             lock_all_on_startup: true,
+            mode: Mode::Slicing,
         }
     }
 }
@@ -443,6 +452,15 @@ impl JonnahSlicer<'_> {
 
                 ui.add_space(16.0);
                 egui::widgets::global_theme_preference_buttons(ui);
+                ui.add_space(48.0);
+
+                if ui.button("Slice").clicked() {
+                    self.mode = Mode::Slicing;
+                }
+                if ui.button("Arrange").clicked() {
+                    self.mode = Mode::Arranging;
+                }
+
             });
         });
     }
@@ -685,7 +703,7 @@ impl JonnahSlicer<'_> {
         });
     }
 
-    fn draw_main_ui(&mut self, ui: &mut egui::Ui) {
+    fn draw_slicer_ui(&mut self, ui: &mut egui::Ui) {
         let display_length =
             num_rational::Ratio::new(8 * (256.0 * self.zoom_level).round() as i64, 256);
 
@@ -956,6 +974,8 @@ impl JonnahSlicer<'_> {
             self.project.stems.remove(stem_i);
         }
     }
+
+    fn draw_arranger_ui(&self, _ui: &mut egui::Ui) {}
 
     fn export_stem(
         &self,
@@ -1499,7 +1519,10 @@ impl eframe::App for JonnahSlicer<'_> {
                 } else {
                     egui::scroll_area::ScrollSource::MOUSE_WHEEL
                 })
-                .show(ui, |ui| self.draw_main_ui(ui));
+                .show(ui, |ui| match self.mode {
+                    Mode::Slicing => self.draw_slicer_ui(ui),
+                    Mode::Arranging => self.draw_arranger_ui(ui),
+                });
 
             let rect = ui.available_rect_before_wrap();
 
