@@ -1,7 +1,5 @@
-use crate::{
-    arranger::draw_notes_in_column,
-    audio::{self, calculate_num_samples},
-};
+use crate::arranger::draw_notes_in_column;
+use crate::audio::{self, TimePoint, calculate_num_samples};
 
 use audio::RatioExt as _;
 use egui::{Button, emath::Numeric as _};
@@ -109,7 +107,7 @@ pub struct JonnahSlicer<'a> {
     #[serde(skip)]
     project: LiveProject,
 
-    display_start: crate::audio::TimePoint,
+    display_start: TimePoint,
 
     /// The number of points to draw in channel
     visual_density: usize,
@@ -136,7 +134,7 @@ pub struct JonnahSlicer<'a> {
     selection: Selection,
 
     #[serde(skip)]
-    painting_keysound: Option<(usize, audio::TimePoint)>,
+    painting_keysound: Option<(usize, TimePoint)>,
 
     // whether the project should be refreshed at the start of the next frame
     #[serde(skip)]
@@ -279,12 +277,12 @@ impl LiveProject {
 
 #[derive(Default, Debug)]
 struct Selection {
-    from: Option<(usize, audio::TimePoint)>,
-    to: Option<audio::TimePoint>,
+    from: Option<(usize, TimePoint)>,
+    to: Option<TimePoint>,
 }
 
 impl Selection {
-    pub fn select(&mut self, index: usize, point: audio::TimePoint) {
+    pub fn select(&mut self, index: usize, point: TimePoint) {
         match (self.from, self.to) {
             (None, _) => {
                 if self.from.is_none() {
@@ -305,7 +303,7 @@ impl Selection {
         }
     }
 
-    pub fn get(&self) -> Option<(usize, std::ops::Range<audio::TimePoint>)> {
+    pub fn get(&self) -> Option<(usize, std::ops::Range<TimePoint>)> {
         if let Some((index, from)) = &self.from
             && let Some(to) = &self.to
         {
@@ -331,7 +329,7 @@ impl Default for JonnahSlicer<'_> {
             input_state: InputState::default(),
             zoom_level: 1.0,
             jonnah_image: None,
-            display_start: crate::audio::TimePoint::default(),
+            display_start: TimePoint::default(),
             slice_snapping: crate::audio::Snapping::default(),
             audio_player: match crate::audio_player::AudioPlayer::new(
                 crate::project::SampleRate::default(),
@@ -981,6 +979,7 @@ impl JonnahSlicer<'_> {
 
     fn draw_arranger_ui(&self, ui: &mut egui::Ui) {
         use crate::arranger;
+        use audio::TimePoint;
 
         const PLAY_COLS: [(egui::Color32, usize); 8] = [
             (egui::Color32::RED, 22),
@@ -999,10 +998,15 @@ impl JonnahSlicer<'_> {
 
         ui.spacing_mut().item_spacing.x = 1.0;
 
-        let tp_range = audio::TimePoint::ZERO..audio::TimePoint::from_measure(1);
+        let tp_range = {
+            let start = TimePoint::ZERO;
+            let end = TimePoint::from_measure(3);
+
+            start..end
+        };
 
         let dummy_notes: [arranger::Note; 8] = std::array::from_fn(|i| arranger::Note {
-            tp: audio::TimePoint::from_submeasure(0, i.cast_signed() as i64, 8),
+            tp: TimePoint::from_submeasure(0, i.cast_signed() as i64, 8),
         });
 
         let col_height = ui.available_height() * 0.9;
@@ -1036,7 +1040,7 @@ impl JonnahSlicer<'_> {
                 arranger::draw_notes_in_column(
                     ui,
                     col,
-                    tp_range.clone(),
+                    &tp_range,
                     note_colour,
                     &dummy_notes[i..i + 1],
                 );
@@ -1056,13 +1060,11 @@ impl JonnahSlicer<'_> {
                     Some(egui::Color32::from_gray(150)),
                 );
 
-                draw_notes_in_column(
-                    ui,
-                    col,
-                    tp_range.clone(),
-                    egui::Color32::DARK_RED,
-                    &dummy_notes,
-                );
+                let notes = Vec::from_iter(stem.stem.slices.iter().map(|slice| arranger::Note {
+                    tp: slice.time_point,
+                }));
+
+                draw_notes_in_column(ui, col, &tp_range, egui::Color32::DARK_RED, &notes);
             }
         });
     }
@@ -1154,7 +1156,7 @@ impl JonnahSlicer<'_> {
                         stem.locked = !stem.locked;
                     }
 
-                    let Ok(click_point) = crate::audio::TimePoint::from_sample(
+                    let Ok(click_point) = TimePoint::from_sample(
                         sample_clicked,
                         self.project.sample_rate.0,
                         &self.project.timing,
@@ -1279,7 +1281,7 @@ impl JonnahSlicer<'_> {
                     }
                 }
                 StemEvent::LeftClick(sample_clicked) => {
-                    let Ok(click_point) = crate::audio::TimePoint::from_sample(
+                    let Ok(click_point) = TimePoint::from_sample(
                         sample_clicked,
                         self.project.sample_rate.0,
                         &self.project.timing,
@@ -1342,7 +1344,7 @@ impl JonnahSlicer<'_> {
                 }
 
                 StemEvent::RightClick(sample_clicked) => {
-                    let Ok(time_point) = crate::audio::TimePoint::from_sample(
+                    let Ok(time_point) = TimePoint::from_sample(
                         sample_clicked,
                         self.project.sample_rate.0,
                         &self.project.timing,
@@ -1583,8 +1585,7 @@ impl eframe::App for JonnahSlicer<'_> {
                         0.into()
                     });
 
-            self.display_start =
-                (self.display_start + audio::TimePoint::from(-diff)).clamped_to_zero();
+            self.display_start = (self.display_start + TimePoint::from(-diff)).clamped_to_zero();
         }
 
         if self.quit_application {
@@ -1667,8 +1668,8 @@ fn draw_stem(
     live_stem: &LiveStem,
     timing: &audio::Timing,
     input_state: &InputState,
-    start_time: crate::audio::TimePoint,
-    end_time: crate::audio::TimePoint,
+    start_time: TimePoint,
+    end_time: TimePoint,
 ) -> Result<(egui::Rect, Option<StemEvent>), crate::Error> {
     let bpm_changes = timing.bpm_changes();
 
@@ -1686,7 +1687,7 @@ fn draw_stem(
         .unwrap_or_default();
 
     let start = calculate_num_samples(
-        crate::audio::TimePoint::default(),
+        TimePoint::default(),
         start_time,
         sample_rate,
         NUM_CHANNELS,
@@ -1694,7 +1695,7 @@ fn draw_stem(
     )?;
 
     let end = calculate_num_samples(
-        crate::audio::TimePoint::default(),
+        TimePoint::default(),
         end_time,
         sample_rate,
         NUM_CHANNELS,
@@ -1749,7 +1750,7 @@ fn draw_stem(
     for i in start_time.to_integer()..end_time.to_integer() {
         let measure_sample_index = calculate_num_samples(
             Default::default(),
-            crate::audio::TimePoint::from_measure(i),
+            TimePoint::from_measure(i),
             sample_rate,
             NUM_CHANNELS,
             timing,

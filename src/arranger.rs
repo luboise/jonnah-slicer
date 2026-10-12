@@ -50,7 +50,7 @@ pub fn draw_column(
 pub fn draw_notes_in_column(
     ui: &mut egui::Ui,
     col_rect: egui::Rect,
-    range: std::ops::Range<crate::audio::TimePoint>,
+    range: &std::ops::Range<crate::audio::TimePoint>,
     colour: egui::Color32,
     notes: &[Note],
 ) {
@@ -76,7 +76,7 @@ pub fn draw_notes_in_column(
         painter.rect_filled(note_rect, col_rect.width() * 0.05, colour);
     };
 
-    for note in notes {
+    for note in notes.iter().filter(|note| range.contains(&note.tp)) {
         let note_ratio = (note.tp - range.start) / (range.end - range.start);
         draw_note(note_ratio.to_f64());
     }
