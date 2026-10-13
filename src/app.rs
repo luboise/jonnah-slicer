@@ -1,4 +1,3 @@
-use crate::arranger::draw_notes_in_column;
 use crate::audio::{self, TimePoint, calculate_num_samples};
 
 use audio::RatioExt as _;
@@ -6,6 +5,7 @@ use egui::{Button, emath::Numeric as _};
 use std::hash::{Hash as _, Hasher as _};
 
 pub const STEM_HEIGHT: f32 = 200.0;
+pub const SENSE_DISTANCE: f64 = 0.075;
 
 #[derive(Default)]
 struct InputState {
@@ -1030,7 +1030,7 @@ impl JonnahSlicer<'_> {
             // draw dummy columns
             for (i, (note_colour, col_width)) in PLAY_COLS.into_iter().enumerate() {
                 let col_width = col_width as f32 * COLUMN_SCALE as f32;
-                let col = arranger::draw_column(
+                let (col, response) = arranger::draw_column(
                     ui,
                     col_width,
                     col_height,
@@ -1044,6 +1044,14 @@ impl JonnahSlicer<'_> {
                     note_colour,
                     &dummy_notes[i..i + 1],
                 );
+
+                if response.clicked() {
+                    if let Some(pos) = response.hover_pos() {
+                        log::info!("clicked at {pos:#?}");
+                    } else {
+                        log::error!("failed to get hovered pos");
+                    }
+                }
             }
 
             // draw stems
@@ -1052,7 +1060,7 @@ impl JonnahSlicer<'_> {
                     continue;
                 }
 
-                let col = arranger::draw_column(
+                let (col, _) = arranger::draw_column(
                     ui,
                     20.0 * COLUMN_SCALE as f32,
                     col_height,
@@ -1064,7 +1072,62 @@ impl JonnahSlicer<'_> {
                     tp: slice.time_point,
                 }));
 
-                draw_notes_in_column(ui, col, &tp_range, egui::Color32::DARK_RED, &notes);
+                // TODO: dedup this from main
+                if let Some(note) = arranger::draw_notes_in_column(
+                    ui,
+                    col,
+                    &tp_range,
+                    egui::Color32::DARK_RED,
+                    &notes,
+                ) && let Some((closest, _)) =
+                    stem.stem.slices.closest_bound(note.tp, SENSE_DISTANCE)
+                    && let Some(audio) = &stem.audio
+                    && let Some([l, r]) = stem
+                        .stem
+                        .slices
+                        .slices()
+                        .array_windows()
+                        .find(|[l, _]| l.time_point == closest.time_point)
+                {
+                    let start_sample_index = l
+                        .time_point
+                        .samples_from_start(audio.sample_rate(), &self.project.timing)
+                        .unwrap_or(0);
+                    let end_sample_index = r
+                        .time_point
+                        .samples_from_start(audio.sample_rate(), &self.project.timing)
+                        .unwrap_or(0);
+
+                    // TODO: Put make this pre-trim it before fetching the channels?
+                    if let Ok(channels) = stem
+                        .audio
+                        .as_ref()
+                        .expect("NO AUDIO IN STEM?")
+                        .channels()
+                        .into_iter()
+                        .map(|channel| {
+                            channel
+                                .get(start_sample_index..end_sample_index)
+                                .map(|v| v.to_vec())
+                                .ok_or("bad channel")
+                        })
+                        .collect::<Result<Vec<_>, _>>()
+                    {
+                        let playback = crate::audio_player::AudioPlayback::new(
+                            // TODO: Make this not clone the channels completely
+                            channels, None,
+                        )
+                        .expect("failed to add audio");
+
+                        if let Some(audio_player) = &self.audio_player
+                            && let Err(e) = audio_player.add_audio(playback)
+                        {
+                            log::error!("failed to add audio: {e}");
+                        }
+                    } else {
+                        log::error!("bad channel");
+                    }
+                }
             }
         });
     }
@@ -1140,8 +1203,6 @@ impl JonnahSlicer<'_> {
     }
 
     fn handle_stem_events(&mut self) {
-        const SENSE_DISTANCE: f64 = 0.075;
-
         for (stem_i, event) in std::mem::take(&mut self.stem_events) {
             let Some(stem) = self.project.stems.get_mut(stem_i) else {
                 continue;

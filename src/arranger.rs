@@ -35,28 +35,30 @@ pub fn draw_column(
     width: f32,
     height: f32,
     colour: Option<egui::Color32>,
-) -> egui::Rect {
-    let (col_rect, _) =
-        ui.allocate_exact_size(egui::Vec2::new(width, height), egui::Sense::hover());
+) -> (egui::Rect, egui::Response) {
+    let (col_rect, response) =
+        ui.allocate_exact_size(egui::Vec2::new(width, height), egui::Sense::click());
 
     if let Some(colour) = colour {
         ui.painter().rect_filled(col_rect, 0, colour);
     }
 
-    col_rect
+    (col_rect, response)
 }
 
 /// Draw notes in the rect of a column
-pub fn draw_notes_in_column(
+pub fn draw_notes_in_column<'a>(
     ui: &mut egui::Ui,
     col_rect: egui::Rect,
     range: &std::ops::Range<crate::audio::TimePoint>,
     colour: egui::Color32,
-    notes: &[Note],
-) {
-    let painter = ui.painter();
+    notes: &'a [Note],
+) -> Option<&'a Note> {
+    // let painter = ui.painter();
 
-    let draw_note = move |height| {
+    let mut clicked_note = None;
+
+    let draw_note = move |ui: &mut egui::Ui, height| {
         let egui::emath::Rangef { min, max } = col_rect.y_range();
 
         let bottom = max - (max - min) * height as f32;
@@ -73,11 +75,17 @@ pub fn draw_notes_in_column(
 
         let note_rect = egui::Rect::from_min_size(tl, size);
 
-        painter.rect_filled(note_rect, col_rect.width() * 0.05, colour);
+        let note = egui::Button::new("7X").fill(colour);
+
+        ui.put(note_rect, note).clicked()
     };
 
     for note in notes.iter().filter(|note| range.contains(&note.tp)) {
         let note_ratio = (note.tp - range.start) / (range.end - range.start);
-        draw_note(note_ratio.to_f64());
+        if draw_note(ui, note_ratio.to_f64()) {
+            clicked_note = Some(note);
+        }
     }
+
+    clicked_note
 }
